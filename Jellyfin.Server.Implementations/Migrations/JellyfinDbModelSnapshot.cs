@@ -5,17 +5,17 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
+#nullable disable
+
 namespace Jellyfin.Server.Implementations.Migrations
 {
-    [DbContext(typeof(JellyfinDb))]
+    [DbContext(typeof(JellyfinDbContext))]
     partial class JellyfinDbModelSnapshot : ModelSnapshot
     {
         protected override void BuildModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
-            modelBuilder
-                .HasDefaultSchema("jellyfin")
-                .HasAnnotation("ProductVersion", "5.0.7");
+            modelBuilder.HasAnnotation("ProductVersion", "7.0.5");
 
             modelBuilder.Entity("Jellyfin.Data.Entities.AccessSchedule", b =>
                 {
@@ -84,6 +84,8 @@ namespace Jellyfin.Server.Implementations.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("DateCreated");
 
                     b.ToTable("ActivityLogs");
                 });
@@ -460,10 +462,6 @@ namespace Jellyfin.Server.Implementations.Migrations
 
                     b.Property<bool>("DisplayMissingEpisodes")
                         .HasColumnType("INTEGER");
-
-                    b.Property<string>("EasyPassword")
-                        .HasMaxLength(65535)
-                        .HasColumnType("TEXT");
 
                     b.Property<bool>("EnableAutoLogin")
                         .HasColumnType("INTEGER");

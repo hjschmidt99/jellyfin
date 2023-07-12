@@ -5,9 +5,11 @@
 using System;
 using System.Buffers.Text;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -23,6 +25,7 @@ using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.Audio;
 using MediaBrowser.Controller.Entities.Movies;
 using MediaBrowser.Controller.Entities.TV;
+using MediaBrowser.Controller.Extensions;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.LiveTv;
 using MediaBrowser.Controller.Persistence;
@@ -32,6 +35,7 @@ using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.Globalization;
 using MediaBrowser.Model.LiveTv;
 using MediaBrowser.Model.Querying;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using SQLitePCL.pretty;
 
@@ -47,8 +51,8 @@ namespace Emby.Server.Implementations.Data
 
         private const string SaveItemCommandText =
             @"replace into TypedBaseItems
-            (guid,type,data,Path,StartDate,EndDate,ChannelId,IsMovie,IsSeries,EpisodeTitle,IsRepeat,CommunityRating,CustomRating,IndexNumber,IsLocked,Name,OfficialRating,MediaType,Overview,ParentIndexNumber,PremiereDate,ProductionYear,ParentId,Genres,InheritedParentalRatingValue,SortName,ForcedSortName,RunTimeTicks,Size,DateCreated,DateModified,PreferredMetadataLanguage,PreferredMetadataCountryCode,Width,Height,DateLastRefreshed,DateLastSaved,IsInMixedFolder,LockedFields,Studios,Audio,ExternalServiceId,Tags,IsFolder,UnratedType,TopParentId,TrailerTypes,CriticRating,CleanName,PresentationUniqueKey,OriginalTitle,PrimaryVersionId,DateLastMediaAdded,Album,IsVirtualItem,SeriesName,UserDataKey,SeasonName,SeasonId,SeriesId,ExternalSeriesId,Tagline,ProviderIds,Images,ProductionLocations,ExtraIds,TotalBitrate,ExtraType,Artists,AlbumArtists,ExternalId,SeriesPresentationUniqueKey,ShowId,OwnerId)
-            values (@guid,@type,@data,@Path,@StartDate,@EndDate,@ChannelId,@IsMovie,@IsSeries,@EpisodeTitle,@IsRepeat,@CommunityRating,@CustomRating,@IndexNumber,@IsLocked,@Name,@OfficialRating,@MediaType,@Overview,@ParentIndexNumber,@PremiereDate,@ProductionYear,@ParentId,@Genres,@InheritedParentalRatingValue,@SortName,@ForcedSortName,@RunTimeTicks,@Size,@DateCreated,@DateModified,@PreferredMetadataLanguage,@PreferredMetadataCountryCode,@Width,@Height,@DateLastRefreshed,@DateLastSaved,@IsInMixedFolder,@LockedFields,@Studios,@Audio,@ExternalServiceId,@Tags,@IsFolder,@UnratedType,@TopParentId,@TrailerTypes,@CriticRating,@CleanName,@PresentationUniqueKey,@OriginalTitle,@PrimaryVersionId,@DateLastMediaAdded,@Album,@IsVirtualItem,@SeriesName,@UserDataKey,@SeasonName,@SeasonId,@SeriesId,@ExternalSeriesId,@Tagline,@ProviderIds,@Images,@ProductionLocations,@ExtraIds,@TotalBitrate,@ExtraType,@Artists,@AlbumArtists,@ExternalId,@SeriesPresentationUniqueKey,@ShowId,@OwnerId)";
+            (guid,type,data,Path,StartDate,EndDate,ChannelId,IsMovie,IsSeries,EpisodeTitle,IsRepeat,CommunityRating,CustomRating,IndexNumber,IsLocked,Name,OfficialRating,MediaType,Overview,ParentIndexNumber,PremiereDate,ProductionYear,ParentId,Genres,InheritedParentalRatingValue,SortName,ForcedSortName,RunTimeTicks,Size,DateCreated,DateModified,PreferredMetadataLanguage,PreferredMetadataCountryCode,Width,Height,DateLastRefreshed,DateLastSaved,IsInMixedFolder,LockedFields,Studios,Audio,ExternalServiceId,Tags,IsFolder,UnratedType,TopParentId,TrailerTypes,CriticRating,CleanName,PresentationUniqueKey,OriginalTitle,PrimaryVersionId,DateLastMediaAdded,Album,LUFS,IsVirtualItem,SeriesName,UserDataKey,SeasonName,SeasonId,SeriesId,ExternalSeriesId,Tagline,ProviderIds,Images,ProductionLocations,ExtraIds,TotalBitrate,ExtraType,Artists,AlbumArtists,ExternalId,SeriesPresentationUniqueKey,ShowId,OwnerId)
+            values (@guid,@type,@data,@Path,@StartDate,@EndDate,@ChannelId,@IsMovie,@IsSeries,@EpisodeTitle,@IsRepeat,@CommunityRating,@CustomRating,@IndexNumber,@IsLocked,@Name,@OfficialRating,@MediaType,@Overview,@ParentIndexNumber,@PremiereDate,@ProductionYear,@ParentId,@Genres,@InheritedParentalRatingValue,@SortName,@ForcedSortName,@RunTimeTicks,@Size,@DateCreated,@DateModified,@PreferredMetadataLanguage,@PreferredMetadataCountryCode,@Width,@Height,@DateLastRefreshed,@DateLastSaved,@IsInMixedFolder,@LockedFields,@Studios,@Audio,@ExternalServiceId,@Tags,@IsFolder,@UnratedType,@TopParentId,@TrailerTypes,@CriticRating,@CleanName,@PresentationUniqueKey,@OriginalTitle,@PrimaryVersionId,@DateLastMediaAdded,@Album,@LUFS,@IsVirtualItem,@SeriesName,@UserDataKey,@SeasonName,@SeasonId,@SeriesId,@ExternalSeriesId,@Tagline,@ProviderIds,@Images,@ProductionLocations,@ExtraIds,@TotalBitrate,@ExtraType,@Artists,@AlbumArtists,@ExternalId,@SeriesPresentationUniqueKey,@ShowId,@OwnerId)";
 
         private readonly IServerConfigurationManager _config;
         private readonly IServerApplicationHost _appHost;
@@ -108,6 +112,7 @@ namespace Emby.Server.Implementations.Data
             "PrimaryVersionId",
             "DateLastMediaAdded",
             "Album",
+            "LUFS",
             "CriticRating",
             "IsVirtualItem",
             "SeriesName",
@@ -178,7 +183,8 @@ namespace Emby.Server.Implementations.Data
             "RpuPresentFlag",
             "ElPresentFlag",
             "BlPresentFlag",
-            "DvBlSignalCompatibilityId"
+            "DvBlSignalCompatibilityId",
+            "IsHearingImpaired"
         };
 
         private static readonly string _mediaStreamSaveColumnsInsertQuery =
@@ -315,13 +321,15 @@ namespace Emby.Server.Implementations.Data
         /// <param name="logger">Instance of the <see cref="ILogger{SqliteItemRepository}"/> interface.</param>
         /// <param name="localization">Instance of the <see cref="ILocalizationManager"/> interface.</param>
         /// <param name="imageProcessor">Instance of the <see cref="IImageProcessor"/> interface.</param>
+        /// <param name="configuration">Instance of the <see cref="IConfiguration"/> interface.</param>
         /// <exception cref="ArgumentNullException">config is null.</exception>
         public SqliteItemRepository(
             IServerConfigurationManager config,
             IServerApplicationHost appHost,
             ILogger<SqliteItemRepository> logger,
             ILocalizationManager localization,
-            IImageProcessor imageProcessor)
+            IImageProcessor imageProcessor,
+            IConfiguration configuration)
             : base(logger)
         {
             _config = config;
@@ -333,10 +341,13 @@ namespace Emby.Server.Implementations.Data
             _jsonOptions = JsonDefaults.Options;
 
             DbFilePath = Path.Combine(_config.ApplicationPaths.DataPath, "library.db");
+
+            CacheSize = configuration.GetSqliteCacheSize();
+            ReadConnectionsCount = Environment.ProcessorCount * 2;
         }
 
         /// <inheritdoc />
-        protected override int? CacheSize => 20000;
+        protected override int? CacheSize { get; }
 
         /// <inheritdoc />
         protected override TempStoreMode TempStore => TempStoreMode.Memory;
@@ -344,19 +355,18 @@ namespace Emby.Server.Implementations.Data
         /// <summary>
         /// Opens the connection to the database.
         /// </summary>
-        /// <param name="userDataRepo">The user data repository.</param>
-        /// <param name="userManager">The user manager.</param>
-        public void Initialize(SqliteUserDataRepository userDataRepo, IUserManager userManager)
+        public override void Initialize()
         {
+            base.Initialize();
+
             const string CreateMediaStreamsTableCommand
-                    = "create table if not exists mediastreams (ItemId GUID, StreamIndex INT, StreamType TEXT, Codec TEXT, Language TEXT, ChannelLayout TEXT, Profile TEXT, AspectRatio TEXT, Path TEXT, IsInterlaced BIT, BitRate INT NULL, Channels INT NULL, SampleRate INT NULL, IsDefault BIT, IsForced BIT, IsExternal BIT, Height INT NULL, Width INT NULL, AverageFrameRate FLOAT NULL, RealFrameRate FLOAT NULL, Level FLOAT NULL, PixelFormat TEXT, BitDepth INT NULL, IsAnamorphic BIT NULL, RefFrames INT NULL, CodecTag TEXT NULL, Comment TEXT NULL, NalLengthSize TEXT NULL, IsAvc BIT NULL, Title TEXT NULL, TimeBase TEXT NULL, CodecTimeBase TEXT NULL, ColorPrimaries TEXT NULL, ColorSpace TEXT NULL, ColorTransfer TEXT NULL, DvVersionMajor INT NULL, DvVersionMinor INT NULL, DvProfile INT NULL, DvLevel INT NULL, RpuPresentFlag INT NULL, ElPresentFlag INT NULL, BlPresentFlag INT NULL, DvBlSignalCompatibilityId INT NULL, PRIMARY KEY (ItemId, StreamIndex))";
+                    = "create table if not exists mediastreams (ItemId GUID, StreamIndex INT, StreamType TEXT, Codec TEXT, Language TEXT, ChannelLayout TEXT, Profile TEXT, AspectRatio TEXT, Path TEXT, IsInterlaced BIT, BitRate INT NULL, Channels INT NULL, SampleRate INT NULL, IsDefault BIT, IsForced BIT, IsExternal BIT, Height INT NULL, Width INT NULL, AverageFrameRate FLOAT NULL, RealFrameRate FLOAT NULL, Level FLOAT NULL, PixelFormat TEXT, BitDepth INT NULL, IsAnamorphic BIT NULL, RefFrames INT NULL, CodecTag TEXT NULL, Comment TEXT NULL, NalLengthSize TEXT NULL, IsAvc BIT NULL, Title TEXT NULL, TimeBase TEXT NULL, CodecTimeBase TEXT NULL, ColorPrimaries TEXT NULL, ColorSpace TEXT NULL, ColorTransfer TEXT NULL, DvVersionMajor INT NULL, DvVersionMinor INT NULL, DvProfile INT NULL, DvLevel INT NULL, RpuPresentFlag INT NULL, ElPresentFlag INT NULL, BlPresentFlag INT NULL, DvBlSignalCompatibilityId INT NULL, IsHearingImpaired BIT NULL, PRIMARY KEY (ItemId, StreamIndex))";
+
             const string CreateMediaAttachmentsTableCommand
                     = "create table if not exists mediaattachments (ItemId GUID, AttachmentIndex INT, Codec TEXT, CodecTag TEXT NULL, Comment TEXT NULL, Filename TEXT NULL, MIMEType TEXT NULL, PRIMARY KEY (ItemId, AttachmentIndex))";
 
             string[] queries =
             {
-                "PRAGMA locking_mode=EXCLUSIVE",
-
                 "create table if not exists TypedBaseItems (guid GUID primary key NOT NULL, type TEXT NOT NULL, data BLOB NULL, ParentId GUID NULL, Path TEXT NULL)",
 
                 "create table if not exists AncestorIds (ItemId GUID NOT NULL, AncestorId GUID NOT NULL, AncestorIdText TEXT NOT NULL, PRIMARY KEY (ItemId, AncestorId))",
@@ -381,39 +391,6 @@ namespace Emby.Server.Implementations.Data
 
             string[] postQueries =
             {
-                // obsolete
-                "drop index if exists idx_TypedBaseItems",
-                "drop index if exists idx_mediastreams",
-                "drop index if exists idx_mediastreams1",
-                "drop index if exists idx_" + ChaptersTableName,
-                "drop index if exists idx_UserDataKeys1",
-                "drop index if exists idx_UserDataKeys2",
-                "drop index if exists idx_TypeTopParentId3",
-                "drop index if exists idx_TypeTopParentId2",
-                "drop index if exists idx_TypeTopParentId4",
-                "drop index if exists idx_Type",
-                "drop index if exists idx_TypeTopParentId",
-                "drop index if exists idx_GuidType",
-                "drop index if exists idx_TopParentId",
-                "drop index if exists idx_TypeTopParentId6",
-                "drop index if exists idx_ItemValues2",
-                "drop index if exists Idx_ProviderIds",
-                "drop index if exists idx_ItemValues3",
-                "drop index if exists idx_ItemValues4",
-                "drop index if exists idx_ItemValues5",
-                "drop index if exists idx_UserDataKeys3",
-                "drop table if exists UserDataKeys",
-                "drop table if exists ProviderIds",
-                "drop index if exists Idx_ProviderIds1",
-                "drop table if exists Images",
-                "drop index if exists idx_Images",
-                "drop index if exists idx_TypeSeriesPresentationUniqueKey",
-                "drop index if exists idx_SeriesPresentationUniqueKey",
-                "drop index if exists idx_TypeSeriesPresentationUniqueKey2",
-                "drop index if exists idx_AncestorIds3",
-                "drop index if exists idx_AncestorIds4",
-                "drop index if exists idx_AncestorIds2",
-
                 "create index if not exists idx_PathTypedBaseItems on TypedBaseItems(Path)",
                 "create index if not exists idx_ParentIdTypedBaseItems on TypedBaseItems(ParentId)",
 
@@ -454,6 +431,9 @@ namespace Emby.Server.Implementations.Data
 
                 // Used to update inherited tags
                 "create index if not exists idx_ItemValues8 on ItemValues(Type, ItemId, Value)",
+
+                "CREATE INDEX IF NOT EXISTS idx_TypedBaseItemsUserDataKeyType ON TypedBaseItems(UserDataKey, Type)",
+                "CREATE INDEX IF NOT EXISTS idx_PeopleNameListOrder ON People(Name, ListOrder)"
             };
 
             using (var connection = GetConnection())
@@ -516,6 +496,7 @@ namespace Emby.Server.Implementations.Data
                         AddColumn(db, "TypedBaseItems", "PrimaryVersionId", "Text", existingColumnNames);
                         AddColumn(db, "TypedBaseItems", "DateLastMediaAdded", "DATETIME", existingColumnNames);
                         AddColumn(db, "TypedBaseItems", "Album", "Text", existingColumnNames);
+                        AddColumn(db, "TypedBaseItems", "LUFS", "Float", existingColumnNames);
                         AddColumn(db, "TypedBaseItems", "IsVirtualItem", "BIT", existingColumnNames);
                         AddColumn(db, "TypedBaseItems", "SeriesName", "Text", existingColumnNames);
                         AddColumn(db, "TypedBaseItems", "UserDataKey", "Text", existingColumnNames);
@@ -572,21 +553,18 @@ namespace Emby.Server.Implementations.Data
                         AddColumn(db, "MediaStreams", "ElPresentFlag", "INT", existingColumnNames);
                         AddColumn(db, "MediaStreams", "BlPresentFlag", "INT", existingColumnNames);
                         AddColumn(db, "MediaStreams", "DvBlSignalCompatibilityId", "INT", existingColumnNames);
+
+                        AddColumn(db, "MediaStreams", "IsHearingImpaired", "BIT", existingColumnNames);
                     },
                     TransactionMode);
 
                 connection.RunQueries(postQueries);
             }
-
-            userDataRepo.Initialize(userManager, WriteLock, WriteConnection);
         }
 
         public void SaveImages(BaseItem item)
         {
-            if (item == null)
-            {
-                throw new ArgumentNullException(nameof(item));
-            }
+            ArgumentNullException.ThrowIfNull(item);
 
             CheckDisposed();
 
@@ -615,20 +593,19 @@ namespace Emby.Server.Implementations.Data
         /// <exception cref="ArgumentNullException">
         /// <paramref name="items"/> or <paramref name="cancellationToken"/> is <c>null</c>.
         /// </exception>
-        public void SaveItems(IEnumerable<BaseItem> items, CancellationToken cancellationToken)
+        public void SaveItems(IReadOnlyList<BaseItem> items, CancellationToken cancellationToken)
         {
-            if (items == null)
-            {
-                throw new ArgumentNullException(nameof(items));
-            }
+            ArgumentNullException.ThrowIfNull(items);
 
             cancellationToken.ThrowIfCancellationRequested();
 
             CheckDisposed();
 
-            var tuples = new List<(BaseItem, List<Guid>, BaseItem, string, List<string>)>();
-            foreach (var item in items)
+            var itemsLen = items.Count;
+            var tuples = new ValueTuple<BaseItem, List<Guid>, BaseItem, string, List<string>>[itemsLen];
+            for (int i = 0; i < itemsLen; i++)
             {
+                var item = items[i];
                 var ancestorIds = item.SupportsAncestors ?
                     item.GetAncestorIds().Distinct().ToList() :
                     null;
@@ -638,7 +615,7 @@ namespace Emby.Server.Implementations.Data
                 var userdataKey = item.GetUserDataKeys().FirstOrDefault();
                 var inheritedTags = item.GetInheritedTags();
 
-                tuples.Add((item, ancestorIds, topParent, userdataKey, inheritedTags));
+                tuples[i] = (item, ancestorIds, topParent, userdataKey, inheritedTags);
             }
 
             using (var connection = GetConnection())
@@ -654,14 +631,8 @@ namespace Emby.Server.Implementations.Data
 
         private void SaveItemsInTransaction(IDatabaseConnection db, IEnumerable<(BaseItem Item, List<Guid> AncestorIds, BaseItem TopParent, string UserDataKey, List<string> InheritedTags)> tuples)
         {
-            var statements = PrepareAll(db, new string[]
-            {
-                SaveItemCommandText,
-                "delete from AncestorIds where ItemId=@ItemId"
-            });
-
-            using (var saveItemStatement = statements[0])
-            using (var deleteAncestorsStatement = statements[1])
+            using (var saveItemStatement = PrepareStatement(db, SaveItemCommandText))
+            using (var deleteAncestorsStatement = PrepareStatement(db, "delete from AncestorIds where ItemId=@ItemId"))
             {
                 var requiresReset = false;
                 foreach (var tuple in tuples)
@@ -693,7 +664,7 @@ namespace Emby.Server.Implementations.Data
 
         private string GetPathToSave(string path)
         {
-            if (path == null)
+            if (path is null)
             {
                 return null;
             }
@@ -892,7 +863,7 @@ namespace Emby.Server.Implementations.Data
 
             saveItemStatement.TryBind("@UnratedType", item.GetBlockUnratedType().ToString());
 
-            if (topParent == null)
+            if (topParent is null)
             {
                 saveItemStatement.TryBindNull("@TopParentId");
             }
@@ -943,6 +914,7 @@ namespace Emby.Server.Implementations.Data
             }
 
             saveItemStatement.TryBind("@Album", item.Album);
+            saveItemStatement.TryBind("@LUFS", item.LUFS);
             saveItemStatement.TryBind("@IsVirtualItem", item.IsVirtualItem);
 
             if (item is IHasSeries hasSeriesName)
@@ -1148,7 +1120,7 @@ namespace Emby.Server.Implementations.Data
             {
                 var image = ItemImageInfoFromValueString(part);
 
-                if (image != null)
+                if (image is not null)
                 {
                     result[position++] = image;
                 }
@@ -1227,7 +1199,7 @@ namespace Emby.Server.Implementations.Data
                 Path = RestorePath(path.ToString())
             };
 
-            if (long.TryParse(dateModified, NumberStyles.Any, CultureInfo.InvariantCulture, out var ticks)
+            if (long.TryParse(dateModified, CultureInfo.InvariantCulture, out var ticks)
                 && ticks >= DateTime.MinValue.Ticks
                 && ticks <= DateTime.MaxValue.Ticks)
             {
@@ -1316,15 +1288,13 @@ namespace Emby.Server.Implementations.Data
             CheckDisposed();
 
             using (var connection = GetConnection(true))
+            using (var statement = PrepareStatement(connection, _retrieveItemColumnsSelectQuery))
             {
-                using (var statement = PrepareStatement(connection, _retrieveItemColumnsSelectQuery))
-                {
-                    statement.TryBind("@guid", id);
+                statement.TryBind("@guid", id);
 
-                    foreach (var row in statement.ExecuteQuery())
-                    {
-                        return GetItem(row, new InternalItemsQuery());
-                    }
+                foreach (var row in statement.ExecuteQuery())
+                {
+                    return GetItem(row, new InternalItemsQuery());
                 }
             }
 
@@ -1339,7 +1309,8 @@ namespace Emby.Server.Implementations.Data
                 {
                     return false;
                 }
-                else if (type == typeof(UserRootFolder))
+
+                if (type == typeof(UserRootFolder))
                 {
                     return false;
                 }
@@ -1349,55 +1320,68 @@ namespace Emby.Server.Implementations.Data
             {
                 return false;
             }
-            else if (type == typeof(MusicArtist))
+
+            if (type == typeof(MusicArtist))
             {
                 return false;
             }
-            else if (type == typeof(Person))
+
+            if (type == typeof(Person))
             {
                 return false;
             }
-            else if (type == typeof(MusicGenre))
+
+            if (type == typeof(MusicGenre))
             {
                 return false;
             }
-            else if (type == typeof(Genre))
+
+            if (type == typeof(Genre))
             {
                 return false;
             }
-            else if (type == typeof(Studio))
+
+            if (type == typeof(Studio))
             {
                 return false;
             }
-            else if (type == typeof(PlaylistsFolder))
+
+            if (type == typeof(PlaylistsFolder))
             {
                 return false;
             }
-            else if (type == typeof(PhotoAlbum))
+
+            if (type == typeof(PhotoAlbum))
             {
                 return false;
             }
-            else if (type == typeof(Year))
+
+            if (type == typeof(Year))
             {
                 return false;
             }
-            else if (type == typeof(Book))
+
+            if (type == typeof(Book))
             {
                 return false;
             }
-            else if (type == typeof(LiveTvProgram))
+
+            if (type == typeof(LiveTvProgram))
             {
                 return false;
             }
-            else if (type == typeof(AudioBook))
+
+            if (type == typeof(AudioBook))
             {
                 return false;
             }
-            else if (type == typeof(Audio))
+
+            if (type == typeof(Audio))
             {
                 return false;
             }
-            else if (type == typeof(MusicAlbum))
+
+            if (type == typeof(MusicAlbum))
             {
                 return false;
             }
@@ -1416,7 +1400,7 @@ namespace Emby.Server.Implementations.Data
 
             var type = _typeMapper.GetType(typeString);
 
-            if (type == null)
+            if (type is null)
             {
                 return null;
             }
@@ -1435,7 +1419,7 @@ namespace Emby.Server.Implementations.Data
                 }
             }
 
-            if (item == null)
+            if (item is null)
             {
                 try
                 {
@@ -1446,7 +1430,7 @@ namespace Emby.Server.Implementations.Data
                 }
             }
 
-            if (item == null)
+            if (item is null)
             {
                 return null;
             }
@@ -1781,6 +1765,11 @@ namespace Emby.Server.Implementations.Data
                 item.Album = album;
             }
 
+            if (reader.TryGetSingle(index++, out var lUFS))
+            {
+                item.LUFS = lUFS;
+            }
+
             if (reader.TryGetSingle(index++, out var criticRating))
             {
                 item.CriticRating = criticRating;
@@ -1827,7 +1816,7 @@ namespace Emby.Server.Implementations.Data
             var hasSeries = item as IHasSeries;
             if (hasSeriesFields)
             {
-                if (hasSeries != null)
+                if (hasSeries is not null)
                 {
                     if (reader.TryGetGuid(index, out var seriesId))
                     {
@@ -1940,7 +1929,7 @@ namespace Emby.Server.Implementations.Data
 
             if (HasField(query, ItemFields.SeriesPresentationUniqueKey))
             {
-                if (hasSeries != null)
+                if (hasSeries is not null)
                 {
                     if (reader.TryGetString(index, out var seriesPresentationUniqueKey))
                     {
@@ -1988,22 +1977,19 @@ namespace Emby.Server.Implementations.Data
         {
             CheckDisposed();
 
+            var chapters = new List<ChapterInfo>();
             using (var connection = GetConnection(true))
+            using (var statement = PrepareStatement(connection, "select StartPositionTicks,Name,ImagePath,ImageDateModified from " + ChaptersTableName + " where ItemId = @ItemId order by ChapterIndex asc"))
             {
-                var chapters = new List<ChapterInfo>();
+                statement.TryBind("@ItemId", item.Id);
 
-                using (var statement = PrepareStatement(connection, "select StartPositionTicks,Name,ImagePath,ImageDateModified from " + ChaptersTableName + " where ItemId = @ItemId order by ChapterIndex asc"))
+                foreach (var row in statement.ExecuteQuery())
                 {
-                    statement.TryBind("@ItemId", item.Id);
-
-                    foreach (var row in statement.ExecuteQuery())
-                    {
-                        chapters.Add(GetChapter(row, item));
-                    }
+                    chapters.Add(GetChapter(row, item));
                 }
-
-                return chapters;
             }
+
+            return chapters;
         }
 
         /// <inheritdoc />
@@ -2012,16 +1998,14 @@ namespace Emby.Server.Implementations.Data
             CheckDisposed();
 
             using (var connection = GetConnection(true))
+            using (var statement = PrepareStatement(connection, "select StartPositionTicks,Name,ImagePath,ImageDateModified from " + ChaptersTableName + " where ItemId = @ItemId and ChapterIndex=@ChapterIndex"))
             {
-                using (var statement = PrepareStatement(connection, "select StartPositionTicks,Name,ImagePath,ImageDateModified from " + ChaptersTableName + " where ItemId = @ItemId and ChapterIndex=@ChapterIndex"))
-                {
-                    statement.TryBind("@ItemId", item.Id);
-                    statement.TryBind("@ChapterIndex", index);
+                statement.TryBind("@ItemId", item.Id);
+                statement.TryBind("@ChapterIndex", index);
 
-                    foreach (var row in statement.ExecuteQuery())
-                    {
-                        return GetChapter(row, item);
-                    }
+                foreach (var row in statement.ExecuteQuery())
+                {
+                    return GetChapter(row, item);
                 }
             }
 
@@ -2085,10 +2069,7 @@ namespace Emby.Server.Implementations.Data
                 throw new ArgumentNullException(nameof(id));
             }
 
-            if (chapters == null)
-            {
-                throw new ArgumentNullException(nameof(chapters));
-            }
+            ArgumentNullException.ThrowIfNull(chapters);
 
             var idBlob = id.ToByteArray();
 
@@ -2156,7 +2137,7 @@ namespace Emby.Server.Implementations.Data
 
         private static bool EnableJoinUserData(InternalItemsQuery query)
         {
-            if (query.User == null)
+            if (query.User is null)
             {
                 return false;
             }
@@ -2210,7 +2191,7 @@ namespace Emby.Server.Implementations.Data
 
         private bool HasProgramAttributes(InternalItemsQuery query)
         {
-            if (query.ParentType != null && _programExcludeParentTypes.Contains(query.ParentType.Value))
+            if (query.ParentType is not null && _programExcludeParentTypes.Contains(query.ParentType.Value))
             {
                 return false;
             }
@@ -2225,7 +2206,7 @@ namespace Emby.Server.Implementations.Data
 
         private bool HasServiceName(InternalItemsQuery query)
         {
-            if (query.ParentType != null && _programExcludeParentTypes.Contains(query.ParentType.Value))
+            if (query.ParentType is not null && _programExcludeParentTypes.Contains(query.ParentType.Value))
             {
                 return false;
             }
@@ -2240,7 +2221,7 @@ namespace Emby.Server.Implementations.Data
 
         private bool HasStartDate(InternalItemsQuery query)
         {
-            if (query.ParentType != null && _programExcludeParentTypes.Contains(query.ParentType.Value))
+            if (query.ParentType is not null && _programExcludeParentTypes.Contains(query.ParentType.Value))
             {
                 return false;
             }
@@ -2275,7 +2256,7 @@ namespace Emby.Server.Implementations.Data
 
         private bool HasArtistFields(InternalItemsQuery query)
         {
-            if (query.ParentType != null && _artistExcludeParentTypes.Contains(query.ParentType.Value))
+            if (query.ParentType is not null && _artistExcludeParentTypes.Contains(query.ParentType.Value))
             {
                 return false;
             }
@@ -2397,20 +2378,24 @@ namespace Emby.Server.Implementations.Data
                 columns.Add("UserDatas.rating");
             }
 
-            if (query.SimilarTo != null)
+            if (query.SimilarTo is not null)
             {
                 var item = query.SimilarTo;
 
                 var builder = new StringBuilder();
                 builder.Append('(');
 
-                if (string.IsNullOrEmpty(item.OfficialRating))
+                if (item.InheritedParentalRatingValue == 0)
                 {
-                    builder.Append("(OfficialRating is null * 10)");
+                    builder.Append("((InheritedParentalRatingValue=0) * 10)");
                 }
                 else
                 {
-                    builder.Append("(OfficialRating=@ItemOfficialRating * 10)");
+                    builder.Append(
+                        @"(SELECT CASE WHEN COALESCE(InheritedParentalRatingValue, 0)=0
+                                THEN 0
+                                ELSE 10.0 / (1.0 + ABS(InheritedParentalRatingValue - @InheritedParentalRatingValue))
+                                END)");
                 }
 
                 if (item.ProductionYear.HasValue)
@@ -2421,6 +2406,7 @@ namespace Emby.Server.Implementations.Data
 
                 // genres, tags, studios, person, year?
                 builder.Append("+ (Select count(1) * 10 from ItemValues where ItemId=Guid and CleanValue in (select CleanValue from ItemValues where ItemId=@SimilarItemId))");
+                builder.Append("+ (Select count(1) * 10 from People where ItemId=Guid and Name in (select Name from People where ItemId=@SimilarItemId))");
 
                 if (item is MusicArtist)
                 {
@@ -2461,10 +2447,14 @@ namespace Emby.Server.Implementations.Data
                 builder.Append('(');
 
                 builder.Append("((CleanName like @SearchTermStartsWith or (OriginalTitle not null and OriginalTitle like @SearchTermStartsWith)) * 10)");
+                builder.Append("+ ((CleanName = @SearchTermStartsWith COLLATE NOCASE or (OriginalTitle not null and OriginalTitle = @SearchTermStartsWith COLLATE NOCASE)) * 10)");
 
                 if (query.SearchTerm.Length > 1)
                 {
                     builder.Append("+ ((CleanName like @SearchTermContains or (OriginalTitle not null and OriginalTitle like @SearchTermContains)) * 10)");
+                    builder.Append("+ (SELECT COUNT(1) * 1 from ItemValues where ItemId=Guid and CleanValue like @SearchTermContains)");
+                    builder.Append("+ (SELECT COUNT(1) * 2 from ItemValues where ItemId=Guid and CleanValue like @SearchTermStartsWith)");
+                    builder.Append("+ (SELECT COUNT(1) * 10 from ItemValues where ItemId=Guid and CleanValue like @SearchTermEquals)");
                 }
 
                 builder.Append(") as SearchScore");
@@ -2495,13 +2485,18 @@ namespace Emby.Server.Implementations.Data
             {
                 statement.TryBind("@SearchTermContains", "%" + searchTerm + "%");
             }
+
+            if (commandText.Contains("@SearchTermEquals", StringComparison.OrdinalIgnoreCase))
+            {
+                statement.TryBind("@SearchTermEquals", searchTerm);
+            }
         }
 
         private void BindSimilarParams(InternalItemsQuery query, IStatement statement)
         {
             var item = query.SimilarTo;
 
-            if (item == null)
+            if (item is null)
             {
                 return;
             }
@@ -2521,6 +2516,11 @@ namespace Emby.Server.Implementations.Data
             if (commandText.Contains("@SimilarItemId", StringComparison.OrdinalIgnoreCase))
             {
                 statement.TryBind("@SimilarItemId", item.Id);
+            }
+
+            if (commandText.Contains("@InheritedParentalRatingValue", StringComparison.OrdinalIgnoreCase))
+            {
+                statement.TryBind("@InheritedParentalRatingValue", item.InheritedParentalRatingValue);
             }
         }
 
@@ -2557,14 +2557,9 @@ namespace Emby.Server.Implementations.Data
 
         public int GetCount(InternalItemsQuery query)
         {
-            if (query == null)
-            {
-                throw new ArgumentNullException(nameof(query));
-            }
+            ArgumentNullException.ThrowIfNull(query);
 
             CheckDisposed();
-
-            var now = DateTime.UtcNow;
 
             // Hack for right now since we currently don't support filtering out these duplicates within a query
             if (query.Limit.HasValue && query.EnableGroupByMetadataKey)
@@ -2587,40 +2582,31 @@ namespace Emby.Server.Implementations.Data
             }
 
             var commandText = commandTextBuilder.ToString();
-            int count;
+
+            using (new QueryTimeLogger(Logger, commandText))
             using (var connection = GetConnection(true))
+            using (var statement = PrepareStatement(connection, commandText))
             {
-                using (var statement = PrepareStatement(connection, commandText))
+                if (EnableJoinUserData(query))
                 {
-                    if (EnableJoinUserData(query))
-                    {
-                        statement.TryBind("@UserId", query.User.InternalId);
-                    }
-
-                    BindSimilarParams(query, statement);
-                    BindSearchParams(query, statement);
-
-                    // Running this again will bind the params
-                    GetWhereClauses(query, statement);
-
-                    count = statement.ExecuteQuery().SelectScalarInt().First();
+                    statement.TryBind("@UserId", query.User.InternalId);
                 }
-            }
 
-            LogQueryTime("GetCount", commandText, now);
-            return count;
+                BindSimilarParams(query, statement);
+                BindSearchParams(query, statement);
+
+                // Running this again will bind the params
+                GetWhereClauses(query, statement);
+
+                return statement.ExecuteQuery().SelectScalarInt().First();
+            }
         }
 
         public List<BaseItem> GetItemList(InternalItemsQuery query)
         {
-            if (query == null)
-            {
-                throw new ArgumentNullException(nameof(query));
-            }
+            ArgumentNullException.ThrowIfNull(query);
 
             CheckDisposed();
-
-            var now = DateTime.UtcNow;
 
             // Hack for right now since we currently don't support filtering out these duplicates within a query
             if (query.Limit.HasValue && query.EnableGroupByMetadataKey)
@@ -2665,61 +2651,58 @@ namespace Emby.Server.Implementations.Data
 
             var commandText = commandTextBuilder.ToString();
             var items = new List<BaseItem>();
+            using (new QueryTimeLogger(Logger, commandText))
             using (var connection = GetConnection(true))
+            using (var statement = PrepareStatement(connection, commandText))
             {
-                using (var statement = PrepareStatement(connection, commandText))
+                if (EnableJoinUserData(query))
                 {
-                    if (EnableJoinUserData(query))
-                    {
-                        statement.TryBind("@UserId", query.User.InternalId);
-                    }
-
-                    BindSimilarParams(query, statement);
-                    BindSearchParams(query, statement);
-
-                    // Running this again will bind the params
-                    GetWhereClauses(query, statement);
-
-                    var hasEpisodeAttributes = HasEpisodeAttributes(query);
-                    var hasServiceName = HasServiceName(query);
-                    var hasProgramAttributes = HasProgramAttributes(query);
-                    var hasStartDate = HasStartDate(query);
-                    var hasTrailerTypes = HasTrailerTypes(query);
-                    var hasArtistFields = HasArtistFields(query);
-                    var hasSeriesFields = HasSeriesFields(query);
-
-                    foreach (var row in statement.ExecuteQuery())
-                    {
-                        var item = GetItem(row, query, hasProgramAttributes, hasEpisodeAttributes, hasServiceName, hasStartDate, hasTrailerTypes, hasArtistFields, hasSeriesFields);
-                        if (item != null)
-                        {
-                            items.Add(item);
-                        }
-                    }
+                    statement.TryBind("@UserId", query.User.InternalId);
                 }
 
-                // Hack for right now since we currently don't support filtering out these duplicates within a query
-                if (query.EnableGroupByMetadataKey)
+                BindSimilarParams(query, statement);
+                BindSearchParams(query, statement);
+
+                // Running this again will bind the params
+                GetWhereClauses(query, statement);
+
+                var hasEpisodeAttributes = HasEpisodeAttributes(query);
+                var hasServiceName = HasServiceName(query);
+                var hasProgramAttributes = HasProgramAttributes(query);
+                var hasStartDate = HasStartDate(query);
+                var hasTrailerTypes = HasTrailerTypes(query);
+                var hasArtistFields = HasArtistFields(query);
+                var hasSeriesFields = HasSeriesFields(query);
+
+                foreach (var row in statement.ExecuteQuery())
                 {
-                    var limit = query.Limit ?? int.MaxValue;
-                    limit -= 4;
-                    var newList = new List<BaseItem>();
-
-                    foreach (var item in items)
+                    var item = GetItem(row, query, hasProgramAttributes, hasEpisodeAttributes, hasServiceName, hasStartDate, hasTrailerTypes, hasArtistFields, hasSeriesFields);
+                    if (item is not null)
                     {
-                        AddItem(newList, item);
-
-                        if (newList.Count >= limit)
-                        {
-                            break;
-                        }
+                        items.Add(item);
                     }
-
-                    items = newList;
                 }
             }
 
-            LogQueryTime("GetItemList", commandText, now);
+            // Hack for right now since we currently don't support filtering out these duplicates within a query
+            if (query.EnableGroupByMetadataKey)
+            {
+                var limit = query.Limit ?? int.MaxValue;
+                limit -= 4;
+                var newList = new List<BaseItem>();
+
+                foreach (var item in items)
+                {
+                    AddItem(newList, item);
+
+                    if (newList.Count >= limit)
+                    {
+                        break;
+                    }
+                }
+
+                items = newList;
+            }
 
             return items;
         }
@@ -2772,32 +2755,9 @@ namespace Emby.Server.Implementations.Data
             items.Add(newItem);
         }
 
-        private void LogQueryTime(string methodName, string commandText, DateTime startDate)
-        {
-            var elapsed = (DateTime.UtcNow - startDate).TotalMilliseconds;
-
-#if DEBUG
-            const int SlowThreshold = 100;
-#else
-            const int SlowThreshold = 10;
-#endif
-
-            if (elapsed >= SlowThreshold)
-            {
-                Logger.LogDebug(
-                    "{Method} query time (slow): {ElapsedMs}ms. Query: {Query}",
-                    methodName,
-                    elapsed,
-                    commandText);
-            }
-        }
-
         public QueryResult<BaseItem> GetItems(InternalItemsQuery query)
         {
-            if (query == null)
-            {
-                throw new ArgumentNullException(nameof(query));
-            }
+            ArgumentNullException.ThrowIfNull(query);
 
             CheckDisposed();
 
@@ -2809,8 +2769,6 @@ namespace Emby.Server.Implementations.Data
                     returnList.Count,
                     returnList);
             }
-
-            var now = DateTime.UtcNow;
 
             // Hack for right now since we currently don't support filtering out these duplicates within a query
             if (query.Limit.HasValue && query.EnableGroupByMetadataKey)
@@ -2907,12 +2865,10 @@ namespace Emby.Server.Implementations.Data
                 connection.RunInTransaction(
                     db =>
                     {
-                        var itemQueryStatement = PrepareStatement(db, itemQuery);
-                        var totalRecordCountQueryStatement = PrepareStatement(db, totalRecordCountQuery);
-
                         if (!isReturningZeroItems)
                         {
-                            using (var statement = itemQueryStatement)
+                            using (new QueryTimeLogger(Logger, itemQuery, "GetItems.ItemQuery"))
+                            using (var statement = PrepareStatement(db, itemQuery))
                             {
                                 if (EnableJoinUserData(query))
                                 {
@@ -2936,20 +2892,18 @@ namespace Emby.Server.Implementations.Data
                                 foreach (var row in statement.ExecuteQuery())
                                 {
                                     var item = GetItem(row, query, hasProgramAttributes, hasEpisodeAttributes, hasServiceName, hasStartDate, hasTrailerTypes, hasArtistFields, hasSeriesFields);
-                                    if (item != null)
+                                    if (item is not null)
                                     {
                                         list.Add(item);
                                     }
                                 }
                             }
-
-                            LogQueryTime("GetItems.ItemQuery", itemQuery, now);
                         }
 
-                        now = DateTime.UtcNow;
                         if (query.EnableTotalRecordCount)
                         {
-                            using (var statement = totalRecordCountQueryStatement)
+                            using (new QueryTimeLogger(Logger, totalRecordCountQuery, "GetItems.TotalRecordCount"))
+                            using (var statement = PrepareStatement(db, totalRecordCountQuery))
                             {
                                 if (EnableJoinUserData(query))
                                 {
@@ -2964,8 +2918,6 @@ namespace Emby.Server.Implementations.Data
 
                                 result.TotalRecordCount = statement.ExecuteQuery().SelectScalarInt().First();
                             }
-
-                            LogQueryTime("GetItems.TotalRecordCount", totalRecordCountQuery, now);
                         }
                     },
                     ReadTransactionMode);
@@ -2979,7 +2931,7 @@ namespace Emby.Server.Implementations.Data
         private string GetOrderByText(InternalItemsQuery query)
         {
             var orderBy = query.OrderBy;
-            bool hasSimilar = query.SimilarTo != null;
+            bool hasSimilar = query.SimilarTo is not null;
             bool hasSearch = !string.IsNullOrEmpty(query.SearchTerm);
 
             if (hasSimilar || hasSearch)
@@ -3168,20 +3120,20 @@ namespace Emby.Server.Implementations.Data
                 return ItemSortBy.SimilarityScore;
             }
 
+            if (string.Equals(name, ItemSortBy.SearchScore, StringComparison.OrdinalIgnoreCase))
+            {
+                return ItemSortBy.SearchScore;
+            }
+
             // Unknown SortBy, just sort by the SortName.
             return ItemSortBy.SortName;
         }
 
         public List<Guid> GetItemIdsList(InternalItemsQuery query)
         {
-            if (query == null)
-            {
-                throw new ArgumentNullException(nameof(query));
-            }
+            ArgumentNullException.ThrowIfNull(query);
 
             CheckDisposed();
-
-            var now = DateTime.UtcNow;
 
             var columns = new List<string> { "guid" };
             SetFinalColumnsToSelect(query, columns);
@@ -3219,29 +3171,27 @@ namespace Emby.Server.Implementations.Data
 
             var commandText = commandTextBuilder.ToString();
             var list = new List<Guid>();
+            using (new QueryTimeLogger(Logger, commandText))
             using (var connection = GetConnection(true))
+            using (var statement = PrepareStatement(connection, commandText))
             {
-                using (var statement = PrepareStatement(connection, commandText))
+                if (EnableJoinUserData(query))
                 {
-                    if (EnableJoinUserData(query))
-                    {
-                        statement.TryBind("@UserId", query.User.InternalId);
-                    }
+                    statement.TryBind("@UserId", query.User.InternalId);
+                }
 
-                    BindSimilarParams(query, statement);
-                    BindSearchParams(query, statement);
+                BindSimilarParams(query, statement);
+                BindSearchParams(query, statement);
 
-                    // Running this again will bind the params
-                    GetWhereClauses(query, statement);
+                // Running this again will bind the params
+                GetWhereClauses(query, statement);
 
-                    foreach (var row in statement.ExecuteQuery())
-                    {
-                        list.Add(row[0].ReadGuidFromBlob());
-                    }
+                foreach (var row in statement.ExecuteQuery())
+                {
+                    list.Add(row[0].ReadGuidFromBlob());
                 }
             }
 
-            LogQueryTime("GetItemList", commandText, now);
             return list;
         }
 
@@ -3273,7 +3223,8 @@ namespace Emby.Server.Implementations.Data
             return IsAlphaNumeric(value);
         }
 
-        private List<string> GetWhereClauses(InternalItemsQuery query, IStatement statement)
+#nullable enable
+        private List<string> GetWhereClauses(InternalItemsQuery query, IStatement? statement)
         {
             if (query.IsResumable ?? false)
             {
@@ -3407,7 +3358,7 @@ namespace Emby.Server.Implementations.Data
                 }
             }
 
-            if (query.SimilarTo != null && query.MinSimilarityScore > 0)
+            if (query.SimilarTo is not null && query.MinSimilarityScore > 0)
             {
                 whereClauses.Add("SimilarityScore > " + (query.MinSimilarityScore - 1).ToString(CultureInfo.InvariantCulture));
             }
@@ -3539,6 +3490,13 @@ namespace Emby.Server.Implementations.Data
             {
                 whereClauses.Add("IndexNumber>=@MinIndexNumber");
                 statement?.TryBind("@MinIndexNumber", query.MinIndexNumber.Value);
+            }
+
+            if (query.MinParentAndIndexNumber.HasValue)
+            {
+                whereClauses.Add("((ParentIndexNumber=@MinParentAndIndexNumberParent and IndexNumber>=@MinParentAndIndexNumberIndex) or ParentIndexNumber>@MinParentAndIndexNumberParent)");
+                statement?.TryBind("@MinParentAndIndexNumberParent", query.MinParentAndIndexNumber.Value.ParentIndexNumber);
+                statement?.TryBind("@MinParentAndIndexNumberIndex", query.MinParentAndIndexNumber.Value.IndexNumber);
             }
 
             if (query.MinDateCreated.HasValue)
@@ -3687,7 +3645,7 @@ namespace Emby.Server.Implementations.Data
                         .Append(paramName)
                         .Append("))) OR ");
 
-                    if (statement != null)
+                    if (statement is not null)
                     {
                         query.PersonIds[i].TryWriteBytes(idBytes);
                         statement.TryBind(paramName, idBytes);
@@ -3738,10 +3696,9 @@ namespace Emby.Server.Implementations.Data
             if (!string.IsNullOrWhiteSpace(nameContains))
             {
                 whereClauses.Add("(CleanName like @NameContains or OriginalTitle like @NameContains)");
-                if (statement != null)
+                if (statement is not null)
                 {
                     nameContains = FixUnicodeChars(nameContains);
-
                     statement.TryBind("@NameContains", "%" + GetCleanValue(nameContains) + "%");
                 }
             }
@@ -3867,13 +3824,8 @@ namespace Emby.Server.Implementations.Data
                 foreach (var artistId in query.ArtistIds)
                 {
                     var paramName = "@ArtistIds" + index;
-
                     clauses.Add("(guid in (select itemid from ItemValues where CleanValue = (select CleanName from TypedBaseItems where guid=" + paramName + ") and Type<=1))");
-                    if (statement != null)
-                    {
-                        statement.TryBind(paramName, artistId);
-                    }
-
+                    statement?.TryBind(paramName, artistId);
                     index++;
                 }
 
@@ -3888,13 +3840,8 @@ namespace Emby.Server.Implementations.Data
                 foreach (var artistId in query.AlbumArtistIds)
                 {
                     var paramName = "@ArtistIds" + index;
-
                     clauses.Add("(guid in (select itemid from ItemValues where CleanValue = (select CleanName from TypedBaseItems where guid=" + paramName + ") and Type=1))");
-                    if (statement != null)
-                    {
-                        statement.TryBind(paramName, artistId);
-                    }
-
+                    statement?.TryBind(paramName, artistId);
                     index++;
                 }
 
@@ -3909,13 +3856,8 @@ namespace Emby.Server.Implementations.Data
                 foreach (var artistId in query.ContributingArtistIds)
                 {
                     var paramName = "@ArtistIds" + index;
-
                     clauses.Add("((select CleanName from TypedBaseItems where guid=" + paramName + ") in (select CleanValue from ItemValues where ItemId=Guid and Type=0) AND (select CleanName from TypedBaseItems where guid=" + paramName + ") not in (select CleanValue from ItemValues where ItemId=Guid and Type=1))");
-                    if (statement != null)
-                    {
-                        statement.TryBind(paramName, artistId);
-                    }
-
+                    statement?.TryBind(paramName, artistId);
                     index++;
                 }
 
@@ -3930,13 +3872,8 @@ namespace Emby.Server.Implementations.Data
                 foreach (var albumId in query.AlbumIds)
                 {
                     var paramName = "@AlbumIds" + index;
-
                     clauses.Add("Album in (select Name from typedbaseitems where guid=" + paramName + ")");
-                    if (statement != null)
-                    {
-                        statement.TryBind(paramName, albumId);
-                    }
-
+                    statement?.TryBind(paramName, albumId);
                     index++;
                 }
 
@@ -3951,13 +3888,8 @@ namespace Emby.Server.Implementations.Data
                 foreach (var artistId in query.ExcludeArtistIds)
                 {
                     var paramName = "@ExcludeArtistId" + index;
-
                     clauses.Add("(guid not in (select itemid from ItemValues where CleanValue = (select CleanName from TypedBaseItems where guid=" + paramName + ") and Type<=1))");
-                    if (statement != null)
-                    {
-                        statement.TryBind(paramName, artistId);
-                    }
-
+                    statement?.TryBind(paramName, artistId);
                     index++;
                 }
 
@@ -3972,13 +3904,8 @@ namespace Emby.Server.Implementations.Data
                 foreach (var genreId in query.GenreIds)
                 {
                     var paramName = "@GenreId" + index;
-
                     clauses.Add("(guid in (select itemid from ItemValues where CleanValue = (select CleanName from TypedBaseItems where guid=" + paramName + ") and Type=2))");
-                    if (statement != null)
-                    {
-                        statement.TryBind(paramName, genreId);
-                    }
-
+                    statement?.TryBind(paramName, genreId);
                     index++;
                 }
 
@@ -3993,11 +3920,7 @@ namespace Emby.Server.Implementations.Data
                 foreach (var item in query.Genres)
                 {
                     clauses.Add("@Genre" + index + " in (select CleanValue from ItemValues where ItemId=Guid and Type=2)");
-                    if (statement != null)
-                    {
-                        statement.TryBind("@Genre" + index, GetCleanValue(item));
-                    }
-
+                    statement?.TryBind("@Genre" + index, GetCleanValue(item));
                     index++;
                 }
 
@@ -4012,11 +3935,7 @@ namespace Emby.Server.Implementations.Data
                 foreach (var item in tags)
                 {
                     clauses.Add("@Tag" + index + " in (select CleanValue from ItemValues where ItemId=Guid and Type=4)");
-                    if (statement != null)
-                    {
-                        statement.TryBind("@Tag" + index, GetCleanValue(item));
-                    }
-
+                    statement?.TryBind("@Tag" + index, GetCleanValue(item));
                     index++;
                 }
 
@@ -4031,11 +3950,7 @@ namespace Emby.Server.Implementations.Data
                 foreach (var item in excludeTags)
                 {
                     clauses.Add("@ExcludeTag" + index + " not in (select CleanValue from ItemValues where ItemId=Guid and Type=4)");
-                    if (statement != null)
-                    {
-                        statement.TryBind("@ExcludeTag" + index, GetCleanValue(item));
-                    }
-
+                    statement?.TryBind("@ExcludeTag" + index, GetCleanValue(item));
                     index++;
                 }
 
@@ -4050,14 +3965,8 @@ namespace Emby.Server.Implementations.Data
                 foreach (var studioId in query.StudioIds)
                 {
                     var paramName = "@StudioId" + index;
-
                     clauses.Add("(guid in (select itemid from ItemValues where CleanValue = (select CleanName from TypedBaseItems where guid=" + paramName + ") and Type=3))");
-
-                    if (statement != null)
-                    {
-                        statement.TryBind(paramName, studioId);
-                    }
-
+                    statement?.TryBind(paramName, studioId);
                     index++;
                 }
 
@@ -4072,11 +3981,7 @@ namespace Emby.Server.Implementations.Data
                 foreach (var item in query.OfficialRatings)
                 {
                     clauses.Add("OfficialRating=@OfficialRating" + index);
-                    if (statement != null)
-                    {
-                        statement.TryBind("@OfficialRating" + index, item);
-                    }
-
+                    statement?.TryBind("@OfficialRating" + index, item);
                     index++;
                 }
 
@@ -4084,34 +3989,96 @@ namespace Emby.Server.Implementations.Data
                 whereClauses.Add(clause);
             }
 
-            if (query.MinParentalRating.HasValue)
+            var ratingClauseBuilder = new StringBuilder("(");
+            if (query.HasParentalRating ?? false)
             {
-                whereClauses.Add("InheritedParentalRatingValue>=@MinParentalRating");
-                if (statement != null)
+                ratingClauseBuilder.Append("InheritedParentalRatingValue not null");
+                if (query.MinParentalRating.HasValue)
                 {
-                    statement.TryBind("@MinParentalRating", query.MinParentalRating.Value);
+                    ratingClauseBuilder.Append(" AND InheritedParentalRatingValue >= @MinParentalRating");
+                    statement?.TryBind("@MinParentalRating", query.MinParentalRating.Value);
+                }
+
+                if (query.MaxParentalRating.HasValue)
+                {
+                    ratingClauseBuilder.Append(" AND InheritedParentalRatingValue <= @MaxParentalRating");
+                    statement?.TryBind("@MaxParentalRating", query.MaxParentalRating.Value);
                 }
             }
-
-            if (query.MaxParentalRating.HasValue)
+            else if (query.BlockUnratedItems.Length > 0)
             {
-                whereClauses.Add("InheritedParentalRatingValue<=@MaxParentalRating");
-                if (statement != null)
+                var paramName = "@UnratedType";
+                var index = 0;
+                string blockedUnratedItems = string.Join(',', query.BlockUnratedItems.Select(_ => paramName + index++));
+                ratingClauseBuilder.Append("(InheritedParentalRatingValue is null AND UnratedType not in (" + blockedUnratedItems + "))");
+
+                if (statement is not null)
                 {
-                    statement.TryBind("@MaxParentalRating", query.MaxParentalRating.Value);
+                    for (var ind = 0; ind < query.BlockUnratedItems.Length; ind++)
+                    {
+                        statement.TryBind(paramName + ind, query.BlockUnratedItems[ind].ToString());
+                    }
+                }
+
+                if (query.MinParentalRating.HasValue || query.MaxParentalRating.HasValue)
+                {
+                    ratingClauseBuilder.Append(" OR (");
+                }
+
+                if (query.MinParentalRating.HasValue)
+                {
+                    ratingClauseBuilder.Append("InheritedParentalRatingValue >= @MinParentalRating");
+                    statement?.TryBind("@MinParentalRating", query.MinParentalRating.Value);
+                }
+
+                if (query.MaxParentalRating.HasValue)
+                {
+                    if (query.MinParentalRating.HasValue)
+                    {
+                        ratingClauseBuilder.Append(" AND ");
+                    }
+
+                    ratingClauseBuilder.Append("InheritedParentalRatingValue <= @MaxParentalRating");
+                    statement?.TryBind("@MaxParentalRating", query.MaxParentalRating.Value);
+                }
+
+                if (query.MinParentalRating.HasValue || query.MaxParentalRating.HasValue)
+                {
+                    ratingClauseBuilder.Append(")");
+                }
+
+                if (!(query.MinParentalRating.HasValue || query.MaxParentalRating.HasValue))
+                {
+                    ratingClauseBuilder.Append(" OR InheritedParentalRatingValue not null");
                 }
             }
-
-            if (query.HasParentalRating.HasValue)
+            else if (query.MinParentalRating.HasValue)
             {
-                if (query.HasParentalRating.Value)
+                ratingClauseBuilder.Append("InheritedParentalRatingValue is null OR (InheritedParentalRatingValue >= @MinParentalRating");
+                statement?.TryBind("@MinParentalRating", query.MinParentalRating.Value);
+
+                if (query.MaxParentalRating.HasValue)
                 {
-                    whereClauses.Add("InheritedParentalRatingValue > 0");
+                    ratingClauseBuilder.Append(" AND InheritedParentalRatingValue <= @MaxParentalRating");
+                    statement?.TryBind("@MaxParentalRating", query.MaxParentalRating.Value);
                 }
-                else
-                {
-                    whereClauses.Add("InheritedParentalRatingValue = 0");
-                }
+
+                ratingClauseBuilder.Append(")");
+            }
+            else if (query.MaxParentalRating.HasValue)
+            {
+                ratingClauseBuilder.Append("InheritedParentalRatingValue is null OR InheritedParentalRatingValue <= @MaxParentalRating");
+                statement?.TryBind("@MaxParentalRating", query.MaxParentalRating.Value);
+            }
+            else if (!query.HasParentalRating ?? false)
+            {
+                ratingClauseBuilder.Append("InheritedParentalRatingValue is null");
+            }
+
+            var ratingClauseString = ratingClauseBuilder.ToString();
+            if (!string.Equals(ratingClauseString, "(", StringComparison.OrdinalIgnoreCase))
+            {
+                whereClauses.Add(ratingClauseString + ")");
             }
 
             if (query.HasOfficialRating.HasValue)
@@ -4153,37 +4120,25 @@ namespace Emby.Server.Implementations.Data
             if (!string.IsNullOrWhiteSpace(query.HasNoAudioTrackWithLanguage))
             {
                 whereClauses.Add("((select language from MediaStreams where MediaStreams.ItemId=A.Guid and MediaStreams.StreamType='Audio' and MediaStreams.Language=@HasNoAudioTrackWithLanguage limit 1) is null)");
-                if (statement != null)
-                {
-                    statement.TryBind("@HasNoAudioTrackWithLanguage", query.HasNoAudioTrackWithLanguage);
-                }
+                statement?.TryBind("@HasNoAudioTrackWithLanguage", query.HasNoAudioTrackWithLanguage);
             }
 
             if (!string.IsNullOrWhiteSpace(query.HasNoInternalSubtitleTrackWithLanguage))
             {
                 whereClauses.Add("((select language from MediaStreams where MediaStreams.ItemId=A.Guid and MediaStreams.StreamType='Subtitle' and MediaStreams.IsExternal=0 and MediaStreams.Language=@HasNoInternalSubtitleTrackWithLanguage limit 1) is null)");
-                if (statement != null)
-                {
-                    statement.TryBind("@HasNoInternalSubtitleTrackWithLanguage", query.HasNoInternalSubtitleTrackWithLanguage);
-                }
+                statement?.TryBind("@HasNoInternalSubtitleTrackWithLanguage", query.HasNoInternalSubtitleTrackWithLanguage);
             }
 
             if (!string.IsNullOrWhiteSpace(query.HasNoExternalSubtitleTrackWithLanguage))
             {
                 whereClauses.Add("((select language from MediaStreams where MediaStreams.ItemId=A.Guid and MediaStreams.StreamType='Subtitle' and MediaStreams.IsExternal=1 and MediaStreams.Language=@HasNoExternalSubtitleTrackWithLanguage limit 1) is null)");
-                if (statement != null)
-                {
-                    statement.TryBind("@HasNoExternalSubtitleTrackWithLanguage", query.HasNoExternalSubtitleTrackWithLanguage);
-                }
+                statement?.TryBind("@HasNoExternalSubtitleTrackWithLanguage", query.HasNoExternalSubtitleTrackWithLanguage);
             }
 
             if (!string.IsNullOrWhiteSpace(query.HasNoSubtitleTrackWithLanguage))
             {
                 whereClauses.Add("((select language from MediaStreams where MediaStreams.ItemId=A.Guid and MediaStreams.StreamType='Subtitle' and MediaStreams.Language=@HasNoSubtitleTrackWithLanguage limit 1) is null)");
-                if (statement != null)
-                {
-                    statement.TryBind("@HasNoSubtitleTrackWithLanguage", query.HasNoSubtitleTrackWithLanguage);
-                }
+                statement?.TryBind("@HasNoSubtitleTrackWithLanguage", query.HasNoSubtitleTrackWithLanguage);
             }
 
             if (query.HasSubtitles.HasValue)
@@ -4233,15 +4188,11 @@ namespace Emby.Server.Implementations.Data
             if (query.Years.Length == 1)
             {
                 whereClauses.Add("ProductionYear=@Years");
-                if (statement != null)
-                {
-                    statement.TryBind("@Years", query.Years[0].ToString(CultureInfo.InvariantCulture));
-                }
+                statement?.TryBind("@Years", query.Years[0].ToString(CultureInfo.InvariantCulture));
             }
             else if (query.Years.Length > 1)
             {
                 var val = string.Join(',', query.Years);
-
                 whereClauses.Add("ProductionYear in (" + val + ")");
             }
 
@@ -4249,10 +4200,7 @@ namespace Emby.Server.Implementations.Data
             if (isVirtualItem.HasValue)
             {
                 whereClauses.Add("IsVirtualItem=@IsVirtualItem");
-                if (statement != null)
-                {
-                    statement.TryBind("@IsVirtualItem", isVirtualItem.Value);
-                }
+                statement?.TryBind("@IsVirtualItem", isVirtualItem.Value);
             }
 
             if (query.IsSpecialSeason.HasValue)
@@ -4283,31 +4231,22 @@ namespace Emby.Server.Implementations.Data
             if (queryMediaTypes.Length == 1)
             {
                 whereClauses.Add("MediaType=@MediaTypes");
-                if (statement != null)
-                {
-                    statement.TryBind("@MediaTypes", queryMediaTypes[0]);
-                }
+                statement?.TryBind("@MediaTypes", queryMediaTypes[0]);
             }
             else if (queryMediaTypes.Length > 1)
             {
                 var val = string.Join(',', queryMediaTypes.Select(i => "'" + i + "'"));
-
                 whereClauses.Add("MediaType in (" + val + ")");
             }
 
             if (query.ItemIds.Length > 0)
             {
                 var includeIds = new List<string>();
-
                 var index = 0;
                 foreach (var id in query.ItemIds)
                 {
                     includeIds.Add("Guid = @IncludeId" + index);
-                    if (statement != null)
-                    {
-                        statement.TryBind("@IncludeId" + index, id);
-                    }
-
+                    statement?.TryBind("@IncludeId" + index, id);
                     index++;
                 }
 
@@ -4317,23 +4256,18 @@ namespace Emby.Server.Implementations.Data
             if (query.ExcludeItemIds.Length > 0)
             {
                 var excludeIds = new List<string>();
-
                 var index = 0;
                 foreach (var id in query.ExcludeItemIds)
                 {
                     excludeIds.Add("Guid <> @ExcludeId" + index);
-                    if (statement != null)
-                    {
-                        statement.TryBind("@ExcludeId" + index, id);
-                    }
-
+                    statement?.TryBind("@ExcludeId" + index, id);
                     index++;
                 }
 
                 whereClauses.Add(string.Join(" AND ", excludeIds));
             }
 
-            if (query.ExcludeProviderIds != null && query.ExcludeProviderIds.Count > 0)
+            if (query.ExcludeProviderIds is not null && query.ExcludeProviderIds.Count > 0)
             {
                 var excludeIds = new List<string>();
 
@@ -4347,11 +4281,7 @@ namespace Emby.Server.Implementations.Data
 
                     var paramName = "@ExcludeProviderId" + index;
                     excludeIds.Add("(ProviderIds is null or ProviderIds not like " + paramName + ")");
-                    if (statement != null)
-                    {
-                        statement.TryBind(paramName, "%" + pair.Key + "=" + pair.Value + "%");
-                    }
-
+                    statement?.TryBind(paramName, "%" + pair.Key + "=" + pair.Value + "%");
                     index++;
 
                     break;
@@ -4363,7 +4293,7 @@ namespace Emby.Server.Implementations.Data
                 }
             }
 
-            if (query.HasAnyProviderId != null && query.HasAnyProviderId.Count > 0)
+            if (query.HasAnyProviderId is not null && query.HasAnyProviderId.Count > 0)
             {
                 var hasProviderIds = new List<string>();
 
@@ -4376,7 +4306,7 @@ namespace Emby.Server.Implementations.Data
                     }
 
                     // TODO this seems to be an idea for a better schema where ProviderIds are their own table
-                    //      buut this is not implemented
+                    //      but this is not implemented
                     // hasProviderIds.Add("(COALESCE((select value from ProviderIds where ItemId=Guid and Name = '" + pair.Key + "'), '') <> " + paramName + ")");
 
                     // TODO this is a really BAD way to do it since the pair:
@@ -4390,11 +4320,7 @@ namespace Emby.Server.Implementations.Data
                     hasProviderIds.Add("ProviderIds like " + paramName);
 
                     // this replaces the placeholder with a value, here: %key=val%
-                    if (statement != null)
-                    {
-                        statement.TryBind(paramName, "%" + pair.Key + "=" + pair.Value + "%");
-                    }
-
+                    statement?.TryBind(paramName, "%" + pair.Key + "=" + pair.Value + "%");
                     index++;
 
                     break;
@@ -4471,11 +4397,7 @@ namespace Emby.Server.Implementations.Data
             if (query.AncestorIds.Length == 1)
             {
                 whereClauses.Add("Guid in (select itemId from AncestorIds where AncestorId=@AncestorId)");
-
-                if (statement != null)
-                {
-                    statement.TryBind("@AncestorId", query.AncestorIds[0]);
-                }
+                statement?.TryBind("@AncestorId", query.AncestorIds[0]);
             }
 
             if (query.AncestorIds.Length > 1)
@@ -4488,45 +4410,19 @@ namespace Emby.Server.Implementations.Data
             {
                 var inClause = "select guid from TypedBaseItems where PresentationUniqueKey=@AncestorWithPresentationUniqueKey";
                 whereClauses.Add(string.Format(CultureInfo.InvariantCulture, "Guid in (select itemId from AncestorIds where AncestorId in ({0}))", inClause));
-                if (statement != null)
-                {
-                    statement.TryBind("@AncestorWithPresentationUniqueKey", query.AncestorWithPresentationUniqueKey);
-                }
+                statement?.TryBind("@AncestorWithPresentationUniqueKey", query.AncestorWithPresentationUniqueKey);
             }
 
             if (!string.IsNullOrWhiteSpace(query.SeriesPresentationUniqueKey))
             {
                 whereClauses.Add("SeriesPresentationUniqueKey=@SeriesPresentationUniqueKey");
-
-                if (statement != null)
-                {
-                    statement.TryBind("@SeriesPresentationUniqueKey", query.SeriesPresentationUniqueKey);
-                }
-            }
-
-            if (query.BlockUnratedItems.Length == 1)
-            {
-                whereClauses.Add("(InheritedParentalRatingValue > 0 or UnratedType <> @UnratedType)");
-                if (statement != null)
-                {
-                    statement.TryBind("@UnratedType", query.BlockUnratedItems[0].ToString());
-                }
-            }
-
-            if (query.BlockUnratedItems.Length > 1)
-            {
-                var inClause = string.Join(',', query.BlockUnratedItems.Select(i => "'" + i.ToString() + "'"));
-                whereClauses.Add(
-                    string.Format(
-                        CultureInfo.InvariantCulture,
-                        "(InheritedParentalRatingValue > 0 or UnratedType not in ({0}))",
-                        inClause));
+                statement?.TryBind("@SeriesPresentationUniqueKey", query.SeriesPresentationUniqueKey);
             }
 
             if (query.ExcludeInheritedTags.Length > 0)
             {
                 var paramName = "@ExcludeInheritedTags";
-                if (statement == null)
+                if (statement is null)
                 {
                     int index = 0;
                     string excludedTags = string.Join(',', query.ExcludeInheritedTags.Select(_ => paramName + index++));
@@ -4537,6 +4433,24 @@ namespace Emby.Server.Implementations.Data
                     for (int index = 0; index < query.ExcludeInheritedTags.Length; index++)
                     {
                         statement.TryBind(paramName + index, GetCleanValue(query.ExcludeInheritedTags[index]));
+                    }
+                }
+            }
+
+            if (query.IncludeInheritedTags.Length > 0)
+            {
+                var paramName = "@IncludeInheritedTags";
+                if (statement is null)
+                {
+                    int index = 0;
+                    string includedTags = string.Join(',', query.IncludeInheritedTags.Select(_ => paramName + index++));
+                    whereClauses.Add("((select CleanValue from ItemValues where ItemId=Guid and Type=6 and cleanvalue in (" + includedTags + ")) is not null)");
+                }
+                else
+                {
+                    for (int index = 0; index < query.IncludeInheritedTags.Length; index++)
+                    {
+                        statement.TryBind(paramName + index, GetCleanValue(query.IncludeInheritedTags[index]));
                     }
                 }
             }
@@ -4651,6 +4565,7 @@ namespace Emby.Server.Implementations.Data
 
             return whereClauses;
         }
+#nullable disable
 
         /// <summary>
         /// Formats a where clause for the specified provider.
@@ -4736,7 +4651,7 @@ namespace Emby.Server.Implementations.Data
                 return false;
             }
 
-            if (query.User == null)
+            if (query.User is null)
             {
                 return false;
             }
@@ -4837,10 +4752,7 @@ where AncestorIdText not null and ItemValues.Value not null and ItemValues.Type 
 
         public List<string> GetPeopleNames(InternalPeopleQuery query)
         {
-            if (query == null)
-            {
-                throw new ArgumentNullException(nameof(query));
-            }
+            ArgumentNullException.ThrowIfNull(query);
 
             CheckDisposed();
 
@@ -4860,30 +4772,25 @@ where AncestorIdText not null and ItemValues.Value not null and ItemValues.Type 
                 commandText.Append(" LIMIT ").Append(query.Limit);
             }
 
+            var list = new List<string>();
             using (var connection = GetConnection(true))
+            using (var statement = PrepareStatement(connection, commandText.ToString()))
             {
-                var list = new List<string>();
-                using (var statement = PrepareStatement(connection, commandText.ToString()))
+                // Run this again to bind the params
+                GetPeopleWhereClauses(query, statement);
+
+                foreach (var row in statement.ExecuteQuery())
                 {
-                    // Run this again to bind the params
-                    GetPeopleWhereClauses(query, statement);
-
-                    foreach (var row in statement.ExecuteQuery())
-                    {
-                        list.Add(row.GetString(0));
-                    }
+                    list.Add(row.GetString(0));
                 }
-
-                return list;
             }
+
+            return list;
         }
 
         public List<PersonInfo> GetPeople(InternalPeopleQuery query)
         {
-            if (query == null)
-            {
-                throw new ArgumentNullException(nameof(query));
-            }
+            ArgumentNullException.ThrowIfNull(query);
 
             CheckDisposed();
 
@@ -4903,30 +4810,27 @@ where AncestorIdText not null and ItemValues.Value not null and ItemValues.Type 
                 commandText += " LIMIT " + query.Limit;
             }
 
+            var list = new List<PersonInfo>();
             using (var connection = GetConnection(true))
+            using (var statement = PrepareStatement(connection, commandText))
             {
-                var list = new List<PersonInfo>();
+                // Run this again to bind the params
+                GetPeopleWhereClauses(query, statement);
 
-                using (var statement = PrepareStatement(connection, commandText))
+                foreach (var row in statement.ExecuteQuery())
                 {
-                    // Run this again to bind the params
-                    GetPeopleWhereClauses(query, statement);
-
-                    foreach (var row in statement.ExecuteQuery())
-                    {
-                        list.Add(GetPerson(row));
-                    }
+                    list.Add(GetPerson(row));
                 }
-
-                return list;
             }
+
+            return list;
         }
 
         private List<string> GetPeopleWhereClauses(InternalPeopleQuery query, IStatement statement)
         {
             var whereClauses = new List<string>();
 
-            if (query.User != null && query.IsFavorite.HasValue)
+            if (query.User is not null && query.IsFavorite.HasValue)
             {
                 whereClauses.Add(@"p.Name IN (
 SELECT Name FROM TypedBaseItems WHERE UserDataKey IN (
@@ -4999,10 +4903,7 @@ AND Type = @InternalPersonType)");
                 throw new ArgumentNullException(nameof(itemId));
             }
 
-            if (ancestorIds == null)
-            {
-                throw new ArgumentNullException(nameof(ancestorIds));
-            }
+            ArgumentNullException.ThrowIfNull(ancestorIds);
 
             CheckDisposed();
 
@@ -5124,8 +5025,6 @@ AND Type = @InternalPersonType)");
         {
             CheckDisposed();
 
-            var now = DateTime.UtcNow;
-
             var stringBuilder = new StringBuilder("Select Value From ItemValues where Type", 128);
             if (itemValueTypes.Length == 1)
             {
@@ -5157,6 +5056,7 @@ AND Type = @InternalPersonType)");
             var commandText = stringBuilder.ToString();
 
             var list = new List<string>();
+            using (new QueryTimeLogger(Logger, commandText))
             using (var connection = GetConnection(true))
             using (var statement = PrepareStatement(connection, commandText))
             {
@@ -5169,16 +5069,12 @@ AND Type = @InternalPersonType)");
                 }
             }
 
-            LogQueryTime("GetItemValueNames", commandText, now);
             return list;
         }
 
         private QueryResult<(BaseItem Item, ItemCounts ItemCounts)> GetItemValues(InternalItemsQuery query, int[] itemValueTypes, string returnType)
         {
-            if (query == null)
-            {
-                throw new ArgumentNullException(nameof(query));
-            }
+            ArgumentNullException.ThrowIfNull(query);
 
             if (!query.Limit.HasValue)
             {
@@ -5186,8 +5082,6 @@ AND Type = @InternalPersonType)");
             }
 
             CheckDisposed();
-
-            var now = DateTime.UtcNow;
 
             var typeClause = itemValueTypes.Length == 1 ?
                 ("Type=" + itemValueTypes[0]) :
@@ -5309,7 +5203,7 @@ AND Type = @InternalPersonType)");
                 .Append(" group by PresentationUniqueKey");
 
             if (query.OrderBy.Count != 0
-                || query.SimilarTo != null
+                || query.SimilarTo is not null
                 || !string.IsNullOrEmpty(query.SearchTerm))
             {
                 stringBuilder.Append(GetOrderByText(query));
@@ -5362,6 +5256,7 @@ AND Type = @InternalPersonType)");
 
             var list = new List<(BaseItem, ItemCounts)>();
             var result = new QueryResult<(BaseItem, ItemCounts)>();
+            using (new QueryTimeLogger(Logger, commandText))
             using (var connection = GetConnection(true))
             {
                 connection.RunInTransaction(
@@ -5377,7 +5272,7 @@ AND Type = @InternalPersonType)");
                                     statement.TryBind("@UserId", query.User.InternalId);
                                 }
 
-                                if (typeSubQuery != null)
+                                if (typeSubQuery is not null)
                                 {
                                     GetWhereClauses(typeSubQuery, null);
                                 }
@@ -5398,7 +5293,7 @@ AND Type = @InternalPersonType)");
                                 foreach (var row in statement.ExecuteQuery())
                                 {
                                     var item = GetItem(row, query, hasProgramAttributes, hasEpisodeAttributes, hasServiceName, hasStartDate, hasTrailerTypes, hasArtistFields, hasSeriesFields);
-                                    if (item != null)
+                                    if (item is not null)
                                     {
                                         var countStartColumn = columns.Count - 1;
 
@@ -5418,7 +5313,7 @@ AND Type = @InternalPersonType)");
                                     statement.TryBind("@UserId", query.User.InternalId);
                                 }
 
-                                if (typeSubQuery != null)
+                                if (typeSubQuery is not null)
                                 {
                                     GetWhereClauses(typeSubQuery, null);
                                 }
@@ -5434,8 +5329,6 @@ AND Type = @InternalPersonType)");
                     },
                     ReadTransactionMode);
             }
-
-            LogQueryTime("GetItemValues", commandText, now);
 
             if (result.TotalRecordCount == 0)
             {
@@ -5521,6 +5414,9 @@ AND Type = @InternalPersonType)");
 
             list.AddRange(inheritedTags.Select(i => (6, i)));
 
+            // Remove all invalid values.
+            list.RemoveAll(i => string.IsNullOrEmpty(i.Item2));
+
             return list;
         }
 
@@ -5531,10 +5427,7 @@ AND Type = @InternalPersonType)");
                 throw new ArgumentNullException(nameof(itemId));
             }
 
-            if (values == null)
-            {
-                throw new ArgumentNullException(nameof(values));
-            }
+            ArgumentNullException.ThrowIfNull(values);
 
             CheckDisposed();
 
@@ -5607,10 +5500,7 @@ AND Type = @InternalPersonType)");
                 throw new ArgumentNullException(nameof(itemId));
             }
 
-            if (people == null)
-            {
-                throw new ArgumentNullException(nameof(people));
-            }
+            ArgumentNullException.ThrowIfNull(people);
 
             CheckDisposed();
 
@@ -5664,7 +5554,7 @@ AND Type = @InternalPersonType)");
 
                         statement.TryBind("@Name" + index, person.Name);
                         statement.TryBind("@Role" + index, person.Role);
-                        statement.TryBind("@PersonType" + index, person.Type);
+                        statement.TryBind("@PersonType" + index, person.Type.ToString());
                         statement.TryBind("@SortOrder" + index, person.SortOrder);
                         statement.TryBind("@ListOrder" + index, listIndex);
 
@@ -5693,9 +5583,10 @@ AND Type = @InternalPersonType)");
                 item.Role = role;
             }
 
-            if (reader.TryGetString(3, out var type))
+            if (reader.TryGetString(3, out var type)
+                && Enum.TryParse(type, true, out PersonKind personKind))
             {
-                item.Type = type;
+                item.Type = personKind;
             }
 
             if (reader.TryGetInt32(4, out var sortOrder))
@@ -5710,10 +5601,7 @@ AND Type = @InternalPersonType)");
         {
             CheckDisposed();
 
-            if (query == null)
-            {
-                throw new ArgumentNullException(nameof(query));
-            }
+            ArgumentNullException.ThrowIfNull(query);
 
             var cmdText = _mediaStreamSaveColumnsSelectQuery;
 
@@ -5766,10 +5654,7 @@ AND Type = @InternalPersonType)");
                 throw new ArgumentNullException(nameof(id));
             }
 
-            if (streams == null)
-            {
-                throw new ArgumentNullException(nameof(streams));
-            }
+            ArgumentNullException.ThrowIfNull(streams);
 
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -5881,6 +5766,8 @@ AND Type = @InternalPersonType)");
                         statement.TryBind("@ElPresentFlag" + index, stream.ElPresentFlag);
                         statement.TryBind("@BlPresentFlag" + index, stream.BlPresentFlag);
                         statement.TryBind("@DvBlSignalCompatibilityId" + index, stream.DvBlSignalCompatibilityId);
+
+                        statement.TryBind("@IsHearingImpaired" + index, stream.IsHearingImpaired);
                     }
 
                     statement.Reset();
@@ -6092,12 +5979,15 @@ AND Type = @InternalPersonType)");
                 item.DvBlSignalCompatibilityId = dvBlSignalCompatibilityId;
             }
 
+            item.IsHearingImpaired = reader.GetBoolean(43);
+
             if (item.Type == MediaStreamType.Subtitle)
             {
                 item.LocalizedUndefined = _localization.GetLocalizedString("Undefined");
                 item.LocalizedDefault = _localization.GetLocalizedString("Default");
                 item.LocalizedForced = _localization.GetLocalizedString("Forced");
                 item.LocalizedExternal = _localization.GetLocalizedString("External");
+                item.LocalizedHearingImpaired = _localization.GetLocalizedString("HearingImpaired");
             }
 
             return item;
@@ -6107,10 +5997,7 @@ AND Type = @InternalPersonType)");
         {
             CheckDisposed();
 
-            if (query == null)
-            {
-                throw new ArgumentNullException(nameof(query));
-            }
+            ArgumentNullException.ThrowIfNull(query);
 
             var cmdText = _mediaAttachmentSaveColumnsSelectQuery;
 
@@ -6152,10 +6039,7 @@ AND Type = @InternalPersonType)");
                 throw new ArgumentException("Guid can't be empty.", nameof(id));
             }
 
-            if (attachments == null)
-            {
-                throw new ArgumentNullException(nameof(attachments));
-            }
+            ArgumentNullException.ThrowIfNull(attachments);
 
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -6273,6 +6157,49 @@ AND Type = @InternalPersonType)");
             }
 
             return item;
+        }
+
+#nullable enable
+
+        private readonly struct QueryTimeLogger : IDisposable
+        {
+            private readonly ILogger _logger;
+            private readonly string _commandText;
+            private readonly string _methodName;
+            private readonly long _startTimestamp;
+
+            public QueryTimeLogger(ILogger logger, string commandText, [CallerMemberName] string methodName = "")
+            {
+                _logger = logger;
+                _commandText = commandText;
+                _methodName = methodName;
+                _startTimestamp = logger.IsEnabled(LogLevel.Debug) ? Stopwatch.GetTimestamp() : -1;
+            }
+
+            public void Dispose()
+            {
+                if (_startTimestamp == -1)
+                {
+                    return;
+                }
+
+                var elapsedMs = Stopwatch.GetElapsedTime(_startTimestamp).TotalMilliseconds;
+
+#if DEBUG
+                const int SlowThreshold = 100;
+#else
+                const int SlowThreshold = 10;
+#endif
+
+                if (elapsedMs >= SlowThreshold)
+                {
+                    _logger.LogDebug(
+                        "{Method} query time (slow): {ElapsedMs}ms. Query: {Query}",
+                        _methodName,
+                        elapsedMs,
+                        _commandText);
+                }
+            }
         }
     }
 }

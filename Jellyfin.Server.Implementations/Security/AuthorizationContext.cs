@@ -15,12 +15,12 @@ namespace Jellyfin.Server.Implementations.Security
 {
     public class AuthorizationContext : IAuthorizationContext
     {
-        private readonly JellyfinDbProvider _jellyfinDbProvider;
+        private readonly IDbContextFactory<JellyfinDbContext> _jellyfinDbProvider;
         private readonly IUserManager _userManager;
         private readonly IServerApplicationHost _serverApplicationHost;
 
         public AuthorizationContext(
-            JellyfinDbProvider jellyfinDb,
+            IDbContextFactory<JellyfinDbContext> jellyfinDb,
             IUserManager userManager,
             IServerApplicationHost serverApplicationHost)
         {
@@ -31,7 +31,7 @@ namespace Jellyfin.Server.Implementations.Security
 
         public Task<AuthorizationInfo> GetAuthorizationInfo(HttpContext requestContext)
         {
-            if (requestContext.Request.HttpContext.Items.TryGetValue("AuthorizationInfo", out var cached) && cached != null)
+            if (requestContext.Request.HttpContext.Items.TryGetValue("AuthorizationInfo", out var cached) && cached is not null)
             {
                 return Task.FromResult((AuthorizationInfo)cached); // Cache should never contain null
             }
@@ -71,7 +71,7 @@ namespace Jellyfin.Server.Implementations.Security
             string? version = null;
             string? token = null;
 
-            if (auth != null)
+            if (auth is not null)
             {
                 auth.TryGetValue("DeviceId", out deviceId);
                 auth.TryGetValue("Device", out deviceName);
@@ -121,96 +121,99 @@ namespace Jellyfin.Server.Implementations.Security
 #pragma warning restore CA1508
 
             authInfo.HasToken = true;
-            await using var dbContext = _jellyfinDbProvider.CreateContext();
-            var device = await dbContext.Devices.FirstOrDefaultAsync(d => d.AccessToken == token).ConfigureAwait(false);
-
-            if (device != null)
+            var dbContext = await _jellyfinDbProvider.CreateDbContextAsync().ConfigureAwait(false);
+            await using (dbContext.ConfigureAwait(false))
             {
-                authInfo.IsAuthenticated = true;
-                var updateToken = false;
+                var device = await dbContext.Devices.FirstOrDefaultAsync(d => d.AccessToken == token).ConfigureAwait(false);
 
-                // TODO: Remove these checks for IsNullOrWhiteSpace
-                if (string.IsNullOrWhiteSpace(authInfo.Client))
-                {
-                    authInfo.Client = device.AppName;
-                }
-
-                if (string.IsNullOrWhiteSpace(authInfo.DeviceId))
-                {
-                    authInfo.DeviceId = device.DeviceId;
-                }
-
-                // Temporary. TODO - allow clients to specify that the token has been shared with a casting device
-                var allowTokenInfoUpdate = !authInfo.Client.Contains("chromecast", StringComparison.OrdinalIgnoreCase);
-
-                if (string.IsNullOrWhiteSpace(authInfo.Device))
-                {
-                    authInfo.Device = device.DeviceName;
-                }
-                else if (!string.Equals(authInfo.Device, device.DeviceName, StringComparison.OrdinalIgnoreCase))
-                {
-                    if (allowTokenInfoUpdate)
-                    {
-                        updateToken = true;
-                        device.DeviceName = authInfo.Device;
-                    }
-                }
-
-                if (string.IsNullOrWhiteSpace(authInfo.Version))
-                {
-                    authInfo.Version = device.AppVersion;
-                }
-                else if (!string.Equals(authInfo.Version, device.AppVersion, StringComparison.OrdinalIgnoreCase))
-                {
-                    if (allowTokenInfoUpdate)
-                    {
-                        updateToken = true;
-                        device.AppVersion = authInfo.Version;
-                    }
-                }
-
-                if ((DateTime.UtcNow - device.DateLastActivity).TotalMinutes > 3)
-                {
-                    device.DateLastActivity = DateTime.UtcNow;
-                    updateToken = true;
-                }
-
-                authInfo.User = _userManager.GetUserById(device.UserId);
-
-                if (updateToken)
-                {
-                    dbContext.Devices.Update(device);
-                    await dbContext.SaveChangesAsync().ConfigureAwait(false);
-                }
-            }
-            else
-            {
-                var key = await dbContext.ApiKeys.FirstOrDefaultAsync(apiKey => apiKey.AccessToken == token).ConfigureAwait(false);
-                if (key != null)
+                if (device is not null)
                 {
                     authInfo.IsAuthenticated = true;
-                    authInfo.Client = key.Name;
-                    authInfo.Token = key.AccessToken;
+                    var updateToken = false;
+
+                    // TODO: Remove these checks for IsNullOrWhiteSpace
+                    if (string.IsNullOrWhiteSpace(authInfo.Client))
+                    {
+                        authInfo.Client = device.AppName;
+                    }
+
                     if (string.IsNullOrWhiteSpace(authInfo.DeviceId))
                     {
-                        authInfo.DeviceId = _serverApplicationHost.SystemId;
+                        authInfo.DeviceId = device.DeviceId;
                     }
+
+                    // Temporary. TODO - allow clients to specify that the token has been shared with a casting device
+                    var allowTokenInfoUpdate = !authInfo.Client.Contains("chromecast", StringComparison.OrdinalIgnoreCase);
 
                     if (string.IsNullOrWhiteSpace(authInfo.Device))
                     {
-                        authInfo.Device = _serverApplicationHost.Name;
+                        authInfo.Device = device.DeviceName;
+                    }
+                    else if (!string.Equals(authInfo.Device, device.DeviceName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (allowTokenInfoUpdate)
+                        {
+                            updateToken = true;
+                            device.DeviceName = authInfo.Device;
+                        }
                     }
 
                     if (string.IsNullOrWhiteSpace(authInfo.Version))
                     {
-                        authInfo.Version = _serverApplicationHost.ApplicationVersionString;
+                        authInfo.Version = device.AppVersion;
+                    }
+                    else if (!string.Equals(authInfo.Version, device.AppVersion, StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (allowTokenInfoUpdate)
+                        {
+                            updateToken = true;
+                            device.AppVersion = authInfo.Version;
+                        }
                     }
 
-                    authInfo.IsApiKey = true;
-                }
-            }
+                    if ((DateTime.UtcNow - device.DateLastActivity).TotalMinutes > 3)
+                    {
+                        device.DateLastActivity = DateTime.UtcNow;
+                        updateToken = true;
+                    }
 
-            return authInfo;
+                    authInfo.User = _userManager.GetUserById(device.UserId);
+
+                    if (updateToken)
+                    {
+                        dbContext.Devices.Update(device);
+                        await dbContext.SaveChangesAsync().ConfigureAwait(false);
+                    }
+                }
+                else
+                {
+                    var key = await dbContext.ApiKeys.FirstOrDefaultAsync(apiKey => apiKey.AccessToken == token).ConfigureAwait(false);
+                    if (key is not null)
+                    {
+                        authInfo.IsAuthenticated = true;
+                        authInfo.Client = key.Name;
+                        authInfo.Token = key.AccessToken;
+                        if (string.IsNullOrWhiteSpace(authInfo.DeviceId))
+                        {
+                            authInfo.DeviceId = _serverApplicationHost.SystemId;
+                        }
+
+                        if (string.IsNullOrWhiteSpace(authInfo.Device))
+                        {
+                            authInfo.Device = _serverApplicationHost.Name;
+                        }
+
+                        if (string.IsNullOrWhiteSpace(authInfo.Version))
+                        {
+                            authInfo.Version = _serverApplicationHost.ApplicationVersionString;
+                        }
+
+                        authInfo.IsApiKey = true;
+                    }
+                }
+
+                return authInfo;
+            }
         }
 
         /// <summary>

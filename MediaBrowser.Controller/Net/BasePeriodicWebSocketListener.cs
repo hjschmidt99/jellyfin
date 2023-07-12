@@ -9,7 +9,7 @@ using System.Linq;
 using System.Net.WebSockets;
 using System.Threading;
 using System.Threading.Tasks;
-using MediaBrowser.Model.Net;
+using MediaBrowser.Controller.Net.WebSocketMessages;
 using MediaBrowser.Model.Session;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
@@ -38,10 +38,7 @@ namespace MediaBrowser.Controller.Net
 
         protected BasePeriodicWebSocketListener(ILogger<BasePeriodicWebSocketListener<TReturnDataType, TStateType>> logger)
         {
-            if (logger == null)
-            {
-                throw new ArgumentNullException(nameof(logger));
-            }
+            ArgumentNullException.ThrowIfNull(logger);
 
             Logger = logger;
         }
@@ -77,10 +74,7 @@ namespace MediaBrowser.Controller.Net
         /// <returns>Task.</returns>
         public Task ProcessMessageAsync(WebSocketMessageInfo message)
         {
-            if (message == null)
-            {
-                throw new ArgumentNullException(nameof(message));
-            }
+            ArgumentNullException.ThrowIfNull(message);
 
             if (message.MessageType == StartType)
             {
@@ -172,12 +166,11 @@ namespace MediaBrowser.Controller.Net
 
                 var data = await GetDataToSend().ConfigureAwait(false);
 
-                if (data != null)
+                if (data is not null)
                 {
                     await connection.SendAsync(
-                        new WebSocketMessage<TReturnDataType>
+                        new OutboundWebSocketMessage<TReturnDataType>
                         {
-                            MessageId = Guid.NewGuid(),
                             MessageType = Type,
                             Data = data
                         },
@@ -210,7 +203,7 @@ namespace MediaBrowser.Controller.Net
             {
                 var connection = _activeConnections.FirstOrDefault(c => c.Item1 == message.Connection);
 
-                if (connection != null)
+                if (connection is not null)
                 {
                     DisposeConnection(connection);
                 }
@@ -233,9 +226,15 @@ namespace MediaBrowser.Controller.Net
                 connection.Item2.Cancel();
                 connection.Item2.Dispose();
             }
-            catch (ObjectDisposedException)
+            catch (ObjectDisposedException ex)
             {
                 // TODO Investigate and properly fix.
+                Logger.LogError(ex, "Object Disposed");
+            }
+            catch (Exception ex)
+            {
+                // TODO Investigate and properly fix.
+                Logger.LogError(ex, "Error disposing websocket");
             }
 
             lock (_activeConnections)

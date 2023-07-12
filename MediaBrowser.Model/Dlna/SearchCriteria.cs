@@ -5,21 +5,18 @@ using System.Text.RegularExpressions;
 
 namespace MediaBrowser.Model.Dlna
 {
-    public class SearchCriteria
+    public partial class SearchCriteria
     {
         public SearchCriteria(string search)
         {
-            if (search.Length == 0)
-            {
-                throw new ArgumentException("String can't be empty.", nameof(search));
-            }
+            ArgumentException.ThrowIfNullOrEmpty(search);
 
             SearchType = SearchType.Unknown;
 
-            string[] factors = RegexSplit(search, "(and|or)");
+            string[] factors = AndOrRegex().Split(search);
             foreach (string factor in factors)
             {
-                string[] subFactors = RegexSplit(factor.Trim().Trim('(').Trim(')').Trim(), "\\s", 3);
+                string[] subFactors = WhiteSpaceRegex().Split(factor.Trim().Trim('(').Trim(')').Trim(), 3);
 
                 if (subFactors.Length == 3)
                 {
@@ -49,27 +46,10 @@ namespace MediaBrowser.Model.Dlna
 
         public SearchType SearchType { get; set; }
 
-        /// <summary>
-        /// Splits the specified string.
-        /// </summary>
-        /// <param name="str">The string.</param>
-        /// <param name="term">The term.</param>
-        /// <param name="limit">The limit.</param>
-        /// <returns>System.String[].</returns>
-        private static string[] RegexSplit(string str, string term, int limit)
-        {
-            return new Regex(term).Split(str, limit);
-        }
+        [GeneratedRegex("\\s")]
+        private static partial Regex WhiteSpaceRegex();
 
-        /// <summary>
-        /// Splits the specified string.
-        /// </summary>
-        /// <param name="str">The string.</param>
-        /// <param name="term">The term.</param>
-        /// <returns>System.String[].</returns>
-        private static string[] RegexSplit(string str, string term)
-        {
-            return Regex.Split(str, term, RegexOptions.IgnoreCase);
-        }
+        [GeneratedRegex("(and|or)", RegexOptions.IgnoreCase)]
+        private static partial Regex AndOrRegex();
     }
 }

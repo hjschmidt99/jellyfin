@@ -4,11 +4,12 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using Jellyfin.Data.Enums;
 using MediaBrowser.Model.MediaInfo;
 
 namespace MediaBrowser.Model.Dlna
 {
-    public class ContentFeatureBuilder
+    public static class ContentFeatureBuilder
     {
         public static string BuildImageHeader(
             DeviceProfile profile,
@@ -128,7 +129,7 @@ namespace MediaBrowser.Model.Dlna
             bool isDirectStream,
             long? runtimeTicks,
             string videoProfile,
-            string videoRangeType,
+            VideoRangeType videoRangeType,
             double? videoLevel,
             float? videoFramerate,
             int? packetLength,
@@ -192,7 +193,7 @@ namespace MediaBrowser.Model.Dlna
 
             var orgPnValues = new List<string>();
 
-            if (mediaProfile != null && !string.IsNullOrEmpty(mediaProfile.OrgPn))
+            if (mediaProfile is not null && !string.IsNullOrEmpty(mediaProfile.OrgPn))
             {
                 orgPnValues.AddRange(mediaProfile.OrgPn.Split(',', StringSplitOptions.RemoveEmptyEntries));
             }

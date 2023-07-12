@@ -14,7 +14,7 @@
     "FailedLoginAttemptWithUserName": "从 {0} 尝试登录失败",
     "Favorites": "我的最爱",
     "Folders": "文件夹",
-    "Genres": "风格",
+    "Genres": "类型",
     "HeaderAlbumArtists": "专辑艺术家",
     "HeaderContinueWatching": "继续观看",
     "HeaderFavoriteAlbums": "收藏的专辑",
@@ -123,5 +123,6 @@
     "TaskOptimizeDatabase": "优化数据库",
     "TaskKeyframeExtractorDescription": "从视频文件中提取关键帧以创建更准确的HLS播放列表。这项任务可能需要很长时间。",
     "TaskKeyframeExtractor": "关键帧提取器",
-    "External": "外部"
+    "External": "外部",
+    "HearingImpaired": "听力障碍"
 }

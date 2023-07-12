@@ -2,7 +2,6 @@
 
 using System;
 using System.Globalization;
-using System.Linq;
 using MediaBrowser.Model.Dlna;
 
 namespace Emby.Dlna.Profiles
@@ -95,6 +94,12 @@ namespace Emby.Dlna.Profiles
 
                 new SubtitleProfile
                 {
+                    Format = "sup",
+                    Method = SubtitleDeliveryMethod.External
+                },
+
+                new SubtitleProfile
+                {
                     Format = "srt",
                     Method = SubtitleDeliveryMethod.Embed
                 },
@@ -143,6 +148,12 @@ namespace Emby.Dlna.Profiles
 
                 new SubtitleProfile
                 {
+                    Format = "sup",
+                    Method = SubtitleDeliveryMethod.Embed
+                },
+
+                new SubtitleProfile
+                {
                     Format = "subrip",
                     Method = SubtitleDeliveryMethod.Embed
                 },
@@ -163,19 +174,6 @@ namespace Emby.Dlna.Profiles
                     MimeType = "video/mp4"
                 }
             };
-        }
-
-        public void AddXmlRootAttribute(string name, string value)
-        {
-            var list = XmlRootAttributes.ToList();
-
-            list.Add(new XmlAttribute
-            {
-                Name = name,
-                Value = value
-            });
-
-            XmlRootAttributes = list.ToArray();
         }
     }
 }

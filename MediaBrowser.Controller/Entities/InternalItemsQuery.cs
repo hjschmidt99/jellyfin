@@ -26,6 +26,7 @@ namespace MediaBrowser.Controller.Entities
             EnableTotalRecordCount = true;
             ExcludeArtistIds = Array.Empty<Guid>();
             ExcludeInheritedTags = Array.Empty<string>();
+            IncludeInheritedTags = Array.Empty<string>();
             ExcludeItemIds = Array.Empty<Guid>();
             ExcludeItemTypes = Array.Empty<BaseItemKind>();
             ExcludeTags = Array.Empty<string>();
@@ -55,7 +56,7 @@ namespace MediaBrowser.Controller.Entities
         public InternalItemsQuery(User? user)
             : this()
         {
-            if (user != null)
+            if (user is not null)
             {
                 SetUser(user);
             }
@@ -94,6 +95,8 @@ namespace MediaBrowser.Controller.Entities
         public string[] ExcludeTags { get; set; }
 
         public string[] ExcludeInheritedTags { get; set; }
+
+        public string[] IncludeInheritedTags { get; set; }
 
         public IReadOnlyList<string> Genres { get; set; }
 
@@ -205,6 +208,16 @@ namespace MediaBrowser.Controller.Entities
 
         public int? MinIndexNumber { get; set; }
 
+        /// <summary>
+        /// Gets or sets the minimum ParentIndexNumber and IndexNumber.
+        /// </summary>
+        /// <remarks>
+        /// It produces this where clause:
+        /// <para>(ParentIndexNumber = X and IndexNumber >= Y) or ParentIndexNumber > X.
+        /// </para>
+        /// </remarks>
+        public (int ParentIndexNumber, int IndexNumber)? MinParentAndIndexNumber { get; set; }
+
         public int? AiredDuringSeason { get; set; }
 
         public double? MinCriticRating { get; set; }
@@ -306,7 +319,7 @@ namespace MediaBrowser.Controller.Entities
         {
             set
             {
-                if (value == null)
+                if (value is null)
                 {
                     ParentId = Guid.Empty;
                     ParentType = null;
@@ -358,6 +371,7 @@ namespace MediaBrowser.Controller.Entities
             }
 
             ExcludeInheritedTags = user.GetPreference(PreferenceKind.BlockedTags);
+            IncludeInheritedTags = user.GetPreference(PreferenceKind.AllowedTags);
 
             User = user;
         }

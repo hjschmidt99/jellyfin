@@ -31,7 +31,7 @@ namespace Emby.Dlna.PlayTo
 
             var stateValues = document.Descendants(UPnpNamespaces.ServiceStateTable).FirstOrDefault();
 
-            if (stateValues != null)
+            if (stateValues is not null)
             {
                 foreach (var container in stateValues.Elements(UPnpNamespaces.Svc + "stateVariable"))
                 {
@@ -61,10 +61,7 @@ namespace Emby.Dlna.PlayTo
 
         private static Argument ArgumentFromXml(XElement container)
         {
-            if (container == null)
-            {
-                throw new ArgumentNullException(nameof(container));
-            }
+            ArgumentNullException.ThrowIfNull(container);
 
             return new Argument
             {
@@ -80,7 +77,7 @@ namespace Emby.Dlna.PlayTo
             var element = container.Descendants(UPnpNamespaces.Svc + "allowedValueList")
                 .FirstOrDefault();
 
-            if (element != null)
+            if (element is not null)
             {
                 var values = element.Descendants(UPnpNamespaces.Svc + "allowedValue");
 
@@ -119,7 +116,7 @@ namespace Emby.Dlna.PlayTo
             return string.Format(CultureInfo.InvariantCulture, CommandBase, action.Name, xmlNamespace, stateString);
         }
 
-        public string BuildPost(ServiceAction action, string xmlNamesapce, object value, string commandParameter = "")
+        public string BuildPost(ServiceAction action, string xmlNamespace, object value, string commandParameter = "")
         {
             var stateString = string.Empty;
 
@@ -140,10 +137,10 @@ namespace Emby.Dlna.PlayTo
                 }
             }
 
-            return string.Format(CultureInfo.InvariantCulture, CommandBase, action.Name, xmlNamesapce, stateString);
+            return string.Format(CultureInfo.InvariantCulture, CommandBase, action.Name, xmlNamespace, stateString);
         }
 
-        public string BuildPost(ServiceAction action, string xmlNamesapce, object value, Dictionary<string, string> dictionary)
+        public string BuildPost(ServiceAction action, string xmlNamespace, object value, Dictionary<string, string> dictionary)
         {
             var stateString = string.Empty;
 
@@ -153,9 +150,9 @@ namespace Emby.Dlna.PlayTo
                 {
                     stateString += BuildArgumentXml(arg, "0");
                 }
-                else if (dictionary.ContainsKey(arg.Name))
+                else if (dictionary.TryGetValue(arg.Name, out var argValue))
                 {
-                    stateString += BuildArgumentXml(arg, dictionary[arg.Name]);
+                    stateString += BuildArgumentXml(arg, argValue);
                 }
                 else
                 {
@@ -163,14 +160,14 @@ namespace Emby.Dlna.PlayTo
                 }
             }
 
-            return string.Format(CultureInfo.InvariantCulture, CommandBase, action.Name, xmlNamesapce, stateString);
+            return string.Format(CultureInfo.InvariantCulture, CommandBase, action.Name, xmlNamespace, stateString);
         }
 
         private string BuildArgumentXml(Argument argument, string? value, string commandParameter = "")
         {
             var state = StateVariables.FirstOrDefault(a => string.Equals(a.Name, argument.RelatedStateVariable, StringComparison.OrdinalIgnoreCase));
 
-            if (state != null)
+            if (state is not null)
             {
                 var sendValue = state.AllowedValues.FirstOrDefault(a => string.Equals(a, commandParameter, StringComparison.OrdinalIgnoreCase)) ??
                     (state.AllowedValues.Count > 0 ? state.AllowedValues[0] : value);

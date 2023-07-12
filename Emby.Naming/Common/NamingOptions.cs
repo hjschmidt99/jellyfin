@@ -141,8 +141,7 @@ namespace Emby.Naming.Common
             VideoFileStackingRules = new[]
             {
                 new FileStackRule(@"^(?<filename>.*?)(?:(?<=[\]\)\}])|[ _.-]+)[\(\[]?(?<parttype>cd|dvd|part|pt|dis[ck])[ _.-]*(?<number>[0-9]+)[\)\]]?(?:\.[^.]+)?$", true),
-                new FileStackRule(@"^(?<filename>.*?)(?:(?<=[\]\)\}])|[ _.-]+)[\(\[]?(?<parttype>cd|dvd|part|pt|dis[ck])[ _.-]*(?<number>[a-d])[\)\]]?(?:\.[^.]+)?$", false),
-                new FileStackRule(@"^(?<filename>.*?)(?:(?<=[\]\)\}])|[ _.-]?)(?<number>[a-d])(?:\.[^.]+)?$", false)
+                new FileStackRule(@"^(?<filename>.*?)(?:(?<=[\]\)\}])|[ _.-]+)[\(\[]?(?<parttype>cd|dvd|part|pt|dis[ck])[ _.-]*(?<number>[a-d])[\)\]]?(?:\.[^.]+)?$", false)
             };
 
             CleanDateTimes = new[]
@@ -153,11 +152,12 @@ namespace Emby.Naming.Common
 
             CleanStrings = new[]
             {
-                @"^\s*(?<cleaned>.+?)[ _\,\.\(\)\[\]\-](3d|sbs|tab|hsbs|htab|mvc|HDR|HDC|UHD|UltraHD|4k|ac3|dts|custom|dc|divx|divx5|dsr|dsrip|dutch|dvd|dvdrip|dvdscr|dvdscreener|screener|dvdivx|cam|fragment|fs|hdtv|hdrip|hdtvrip|internal|limited|multisubs|ntsc|ogg|ogm|pal|pdtv|proper|repack|rerip|retail|cd[1-9]|r3|r5|bd5|bd|se|svcd|swedish|german|read.nfo|nfofix|unrated|ws|telesync|ts|telecine|tc|brrip|bdrip|480p|480i|576p|576i|720p|720i|1080p|1080i|2160p|hrhd|hrhdtv|hddvd|bluray|blu-ray|x264|x265|h264|h265|xvid|xvidvd|xxx|www.www|AAC|DTS|\[.*\])([ _\,\.\(\)\[\]\-]|$)",
+                @"^\s*(?<cleaned>.+?)[ _\,\.\(\)\[\]\-](3d|sbs|tab|hsbs|htab|mvc|HDR|HDC|UHD|UltraHD|4k|ac3|dts|custom|dc|divx|divx5|dsr|dsrip|dutch|dvd|dvdrip|dvdscr|dvdscreener|screener|dvdivx|cam|fragment|fs|hdtv|hdrip|hdtvrip|internal|limited|multi|subs|ntsc|ogg|ogm|pal|pdtv|proper|repack|rerip|retail|cd[1-9]|r5|bd5|bd|se|svcd|swedish|german|read.nfo|nfofix|unrated|ws|telesync|ts|telecine|tc|brrip|bdrip|480p|480i|576p|576i|720p|720i|1080p|1080i|2160p|hrhd|hrhdtv|hddvd|bluray|blu-ray|x264|x265|h264|h265|xvid|xvidvd|xxx|www.www|AAC|DTS|\[.*\])([ _\,\.\(\)\[\]\-]|$)",
                 @"^(?<cleaned>.+?)(\[.*\])",
                 @"^\s*(?<cleaned>.+?)\WE[0-9]+(-|~)E?[0-9]+(\W|$)",
                 @"^\s*\[[^\]]+\](?!\.\w+$)\s*(?<cleaned>.+)",
-                @"^\s*(?<cleaned>.+?)\s+-\s+[0-9]+\s*$"
+                @"^\s*(?<cleaned>.+?)\s+-\s+[0-9]+\s*$",
+                @"^\s*(?<cleaned>.+?)(([-._ ](trailer|sample))|-(scene|clip|behindthescenes|deleted|deletedscene|featurette|short|interview|other|extra))$"
             };
 
             SubtitleFileExtensions = new[]
@@ -169,16 +169,36 @@ namespace Emby.Naming.Common
                 ".srt",
                 ".ssa",
                 ".sub",
+                ".sup",
                 ".vtt",
             };
 
             AlbumStackingPrefixes = new[]
             {
                 "cd",
+                "digital media",
                 "disc",
                 "disk",
                 "vol",
                 "volume"
+            };
+
+            ArtistSubfolders = new[]
+            {
+                "albums",
+                "broadcasts",
+                "bootlegs",
+                "compilations",
+                "dj-mixes",
+                "eps",
+                "live",
+                "mixtapes",
+                "others",
+                "remixes",
+                "singles",
+                "soundtracks",
+                "spokenwords",
+                "streets"
             };
 
             AudioFileExtensions = new[]
@@ -250,7 +270,6 @@ namespace Emby.Naming.Common
                 ".sfx",
                 ".shn",
                 ".sid",
-                ".spc",
                 ".stm",
                 ".strm",
                 ".ult",
@@ -278,6 +297,13 @@ namespace Emby.Naming.Common
             MediaDefaultFlags = new[]
             {
                 "default"
+            };
+
+            MediaHearingImpairedFlags = new[]
+            {
+                "cc",
+                "hi",
+                "sdh"
             };
 
             EpisodeExpressions = new[]
@@ -311,7 +337,15 @@ namespace Emby.Naming.Common
                     }
                 },
 
-                // This isn't a Kodi naming rule, but the expression below causes false positives,
+                // This isn't a Kodi naming rule, but the expression below causes false episode numbers for
+                // Title Season X Episode X naming schemes.
+                // "Series Season X Episode X - Title.avi", "Series S03 E09.avi", "s3 e9 - Title.avi"
+                new EpisodeExpression(@".*[\\\/]((?<seriesname>[^\\/]+?)\s)?[Ss](?:eason)?\s*(?<seasonnumber>[0-9]+)\s+[Ee](?:pisode)?\s*(?<epnumber>[0-9]+).*$")
+                {
+                    IsNamed = true
+                },
+
+                // Not a Kodi rule as well, but the expression below also causes false positives,
                 // so we make sure this one gets tested first.
                 // "Foo Bar 889"
                 new EpisodeExpression(@".*[\\\/](?![Ee]pisode)(?<seriesname>[\w\s]+?)\s(?<epnumber>[0-9]{1,4})(-(?<endingepnumber>[0-9]{2,4}))*[^\\\/x]*$")
@@ -426,16 +460,6 @@ namespace Emby.Naming.Common
                 },
             };
 
-            EpisodeWithoutSeasonExpressions = new[]
-            {
-                @"[/\._ \-]()([0-9]+)(-[0-9]+)?"
-            };
-
-            EpisodeMultiPartExpressions = new[]
-            {
-                @"^[-_ex]+([0-9]+(?:(?:[a-i]|\\.[1-9])(?![0-9]))?)"
-            };
-
             VideoExtraRules = new[]
             {
                 new ExtraRule(
@@ -487,13 +511,13 @@ namespace Emby.Naming.Common
                     MediaType.Video),
 
                 new ExtraRule(
-                    ExtraType.Clip,
+                    ExtraType.Short,
                     ExtraRuleType.DirectoryName,
                     "shorts",
                     MediaType.Video),
 
                 new ExtraRule(
-                    ExtraType.Clip,
+                    ExtraType.Featurette,
                     ExtraRuleType.DirectoryName,
                     "featurettes",
                     MediaType.Video),
@@ -502,6 +526,18 @@ namespace Emby.Naming.Common
                     ExtraType.Unknown,
                     ExtraRuleType.DirectoryName,
                     "extras",
+                    MediaType.Video),
+
+                new ExtraRule(
+                    ExtraType.Unknown,
+                    ExtraRuleType.DirectoryName,
+                    "other",
+                    MediaType.Video),
+
+                new ExtraRule(
+                    ExtraType.Clip,
+                    ExtraRuleType.DirectoryName,
+                    "clips",
                     MediaType.Video),
 
                 new ExtraRule(
@@ -607,13 +643,13 @@ namespace Emby.Naming.Common
                     MediaType.Video),
 
                 new ExtraRule(
-                    ExtraType.Clip,
+                    ExtraType.Featurette,
                     ExtraRuleType.Suffix,
                     "-featurette",
                     MediaType.Video),
 
                 new ExtraRule(
-                    ExtraType.Clip,
+                    ExtraType.Short,
                     ExtraRuleType.Suffix,
                     "-short",
                     MediaType.Video),
@@ -622,6 +658,12 @@ namespace Emby.Naming.Common
                     ExtraType.Unknown,
                     ExtraRuleType.Suffix,
                     "-extra",
+                    MediaType.Video),
+
+                new ExtraRule(
+                    ExtraType.Unknown,
+                    ExtraRuleType.Suffix,
+                    "-other",
                     MediaType.Video)
             };
 
@@ -728,9 +770,19 @@ namespace Emby.Naming.Common
         public string[] MediaDefaultFlags { get; set; }
 
         /// <summary>
+        /// Gets or sets list of external media hearing impaired flags.
+        /// </summary>
+        public string[] MediaHearingImpairedFlags { get; set; }
+
+        /// <summary>
         /// Gets or sets list of album stacking prefixes.
         /// </summary>
         public string[] AlbumStackingPrefixes { get; set; }
+
+        /// <summary>
+        /// Gets or sets list of artist subfolders.
+        /// </summary>
+        public string[] ArtistSubfolders { get; set; }
 
         /// <summary>
         /// Gets or sets list of subtitle file extensions.
@@ -741,16 +793,6 @@ namespace Emby.Naming.Common
         /// Gets or sets list of episode regular expressions.
         /// </summary>
         public EpisodeExpression[] EpisodeExpressions { get; set; }
-
-        /// <summary>
-        /// Gets or sets list of raw episode without season regular expressions strings.
-        /// </summary>
-        public string[] EpisodeWithoutSeasonExpressions { get; set; }
-
-        /// <summary>
-        /// Gets or sets list of raw multi-part episodes regular expressions strings.
-        /// </summary>
-        public string[] EpisodeMultiPartExpressions { get; set; }
 
         /// <summary>
         /// Gets or sets list of video file extensions.
@@ -823,24 +865,12 @@ namespace Emby.Naming.Common
         public Regex[] CleanStringRegexes { get; private set; } = Array.Empty<Regex>();
 
         /// <summary>
-        /// Gets list of episode without season regular expressions.
-        /// </summary>
-        public Regex[] EpisodeWithoutSeasonRegexes { get; private set; } = Array.Empty<Regex>();
-
-        /// <summary>
-        /// Gets list of multi-part episode regular expressions.
-        /// </summary>
-        public Regex[] EpisodeMultiPartRegexes { get; private set; } = Array.Empty<Regex>();
-
-        /// <summary>
         /// Compiles raw regex strings into regexes.
         /// </summary>
         public void Compile()
         {
             CleanDateTimeRegexes = CleanDateTimes.Select(Compile).ToArray();
             CleanStringRegexes = CleanStrings.Select(Compile).ToArray();
-            EpisodeWithoutSeasonRegexes = EpisodeWithoutSeasonExpressions.Select(Compile).ToArray();
-            EpisodeMultiPartRegexes = EpisodeMultiPartExpressions.Select(Compile).ToArray();
         }
 
         private Regex Compile(string exp)

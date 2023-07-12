@@ -14,6 +14,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Extensions;
 using Jellyfin.Extensions.Json;
+using Jellyfin.Extensions.Json.Converters;
 using MediaBrowser.Common.Extensions;
 using MediaBrowser.Common.Net;
 using MediaBrowser.Controller;
@@ -58,7 +59,8 @@ namespace Emby.Server.Implementations.LiveTv.TunerHosts.HdHomerun
             _socketFactory = socketFactory;
             _streamHelper = streamHelper;
 
-            _jsonOptions = JsonDefaults.Options;
+            _jsonOptions = new JsonSerializerOptions(JsonDefaults.Options);
+            _jsonOptions.Converters.Add(new JsonBoolNumberConverter());
         }
 
         public string Name => "HD Homerun";
@@ -302,7 +304,7 @@ namespace Emby.Server.Implementations.LiveTv.TunerHosts.HdHomerun
 
             var hdHomerunChannelInfo = channels.FirstOrDefault() as HdHomerunChannelInfo;
 
-            if (hdHomerunChannelInfo == null || hdHomerunChannelInfo.IsLegacyTuner)
+            if (hdHomerunChannelInfo is null || hdHomerunChannelInfo.IsLegacyTuner)
             {
                 return await GetTunerInfosUdp(info, cancellationToken).ConfigureAwait(false);
             }
@@ -503,7 +505,7 @@ namespace Emby.Server.Implementations.LiveTv.TunerHosts.HdHomerun
             {
                 var modelInfo = await GetModelInfo(tuner, false, cancellationToken).ConfigureAwait(false);
 
-                if (modelInfo != null && modelInfo.SupportsTranscoding)
+                if (modelInfo is not null && modelInfo.SupportsTranscoding)
                 {
                     if (tuner.AllowHWTranscoding)
                     {
@@ -560,7 +562,7 @@ namespace Emby.Server.Implementations.LiveTv.TunerHosts.HdHomerun
 
             var mediaSource = GetMediaSource(tunerHost, hdhrId, channel, profile);
 
-            if (hdhomerunChannel != null && hdhomerunChannel.IsLegacyTuner)
+            if (hdhomerunChannel is not null && hdhomerunChannel.IsLegacyTuner)
             {
                 return new HdHomerunUdpStream(
                     mediaSource,
@@ -659,22 +661,22 @@ namespace Emby.Server.Implementations.LiveTv.TunerHosts.HdHomerun
                 // Need a way to set the Receive timeout on the socket otherwise this might never timeout?
                 try
                 {
-                    await udpClient.SendToAsync(discBytes, 0, discBytes.Length, new IPEndPoint(IPAddress.Parse("255.255.255.255"), 65001), cancellationToken).ConfigureAwait(false);
+                    await udpClient.SendToAsync(discBytes, new IPEndPoint(IPAddress.Broadcast, 65001), cancellationToken).ConfigureAwait(false);
                     var receiveBuffer = new byte[8192];
 
                     while (!cancellationToken.IsCancellationRequested)
                     {
-                        var response = await udpClient.ReceiveAsync(receiveBuffer, 0, receiveBuffer.Length, cancellationToken).ConfigureAwait(false);
-                        var deviceIp = response.RemoteEndPoint.Address.ToString();
+                        var response = await udpClient.ReceiveMessageFromAsync(receiveBuffer, new IPEndPoint(IPAddress.Any, 0), cancellationToken).ConfigureAwait(false);
+                        var deviceIP = ((IPEndPoint)response.RemoteEndPoint).Address.ToString();
 
-                        // check to make sure we have enough bytes received to be a valid message and make sure the 2nd byte is the discover reply byte
-                        if (response.ReceivedBytes > 13 && response.Buffer[1] == 3)
+                        // Check to make sure we have enough bytes received to be a valid message and make sure the 2nd byte is the discover reply byte
+                        if (response.ReceivedBytes > 13 && receiveBuffer[1] == 3)
                         {
-                            var deviceAddress = "http://" + deviceIp;
+                            var deviceAddress = "http://" + deviceIP;
 
                             var info = await TryGetTunerHostInfo(deviceAddress, cancellationToken).ConfigureAwait(false);
 
-                            if (info != null)
+                            if (info is not null)
                             {
                                 list.Add(info);
                             }

@@ -54,10 +54,7 @@ namespace Emby.Server.Implementations.Data
 
         public static void RunQueries(this SQLiteDatabaseConnection connection, string[] queries)
         {
-            if (queries == null)
-            {
-                throw new ArgumentNullException(nameof(queries));
-            }
+            ArgumentNullException.ThrowIfNull(queries);
 
             connection.RunInTransaction(conn =>
             {
@@ -256,7 +253,7 @@ namespace Emby.Server.Implementations.Data
         {
             if (statement.BindParameters.TryGetValue(name, out IBindParameter bindParam))
             {
-                if (value == null)
+                if (value is null)
                 {
                     bindParam.BindNull();
                 }

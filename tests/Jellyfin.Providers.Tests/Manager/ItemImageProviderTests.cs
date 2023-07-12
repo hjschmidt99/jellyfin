@@ -25,9 +25,12 @@ using Xunit;
 
 namespace Jellyfin.Providers.Tests.Manager
 {
-    public class ItemImageProviderTests
+    public partial class ItemImageProviderTests
     {
         private const string TestDataImagePath = "Test Data/Images/blank{0}.jpg";
+
+        [GeneratedRegex("[0-9]+")]
+        private static partial Regex NumbersRegex();
 
         [Fact]
         public void ValidateImages_PhotoEmptyProviders_NoChange()
@@ -44,7 +47,7 @@ namespace Jellyfin.Providers.Tests.Manager
             ValidateImages_Test(ImageType.Primary, 0, true, 0, false, 0);
         }
 
-        private static TheoryData<ImageType, int> GetImageTypesWithCount()
+        public static TheoryData<ImageType, int> GetImageTypesWithCount()
         {
             var theoryTypes = new TheoryData<ImageType, int>
             {
@@ -94,7 +97,7 @@ namespace Jellyfin.Providers.Tests.Manager
         public void MergeImages_EmptyItemNewImagesEmpty_NoChange()
         {
             var itemImageProvider = GetItemImageProvider(null, null);
-            var changed = itemImageProvider.MergeImages(new Video(), Array.Empty<LocalImageInfo>());
+            var changed = itemImageProvider.MergeImages(new Video(), Array.Empty<LocalImageInfo>(), new ImageRefreshOptions(Mock.Of<IDirectoryService>()));
 
             Assert.False(changed);
         }
@@ -108,7 +111,7 @@ namespace Jellyfin.Providers.Tests.Manager
             var images = GetImages(imageType, imageCount, false);
 
             var itemImageProvider = GetItemImageProvider(null, null);
-            var changed = itemImageProvider.MergeImages(item, images);
+            var changed = itemImageProvider.MergeImages(item, images, new ImageRefreshOptions(Mock.Of<IDirectoryService>()));
 
             Assert.True(changed);
             // adds for types that allow multiple, replaces singular type images
@@ -151,7 +154,7 @@ namespace Jellyfin.Providers.Tests.Manager
             var images = GetImages(imageType, imageCount, true);
 
             var itemImageProvider = GetItemImageProvider(null, fileSystem);
-            var changed = itemImageProvider.MergeImages(item, images);
+            var changed = itemImageProvider.MergeImages(item, images, new ImageRefreshOptions(Mock.Of<IDirectoryService>()));
 
             if (updateTime)
             {
@@ -463,7 +466,7 @@ namespace Jellyfin.Providers.Tests.Manager
             // images from the provider manager are sorted by preference (earlier images are higher priority) so we can verify that low url numbers are chosen
             foreach (var image in actualImages)
             {
-                var index = int.Parse(Regex.Match(image.Path, @"[0-9]+").Value, NumberStyles.Integer, CultureInfo.InvariantCulture);
+                var index = int.Parse(NumbersRegex().Match(image.Path).ValueSpan, NumberStyles.Integer, CultureInfo.InvariantCulture);
                 Assert.True(index < imageCount);
             }
         }

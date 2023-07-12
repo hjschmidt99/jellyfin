@@ -11,7 +11,9 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using Jellyfin.Extensions;
 using Jellyfin.Extensions.Json;
+using Jellyfin.Extensions.Json.Converters;
 using MediaBrowser.Common;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Common.Extensions;
@@ -34,7 +36,7 @@ namespace MediaBrowser.MediaEncoding.Encoder
     /// <summary>
     /// Class MediaEncoder.
     /// </summary>
-    public class MediaEncoder : IMediaEncoder, IDisposable
+    public partial class MediaEncoder : IMediaEncoder, IDisposable
     {
         /// <summary>
         /// The default SDR image extraction timeout in milliseconds.
@@ -50,10 +52,12 @@ namespace MediaBrowser.MediaEncoding.Encoder
         private readonly IServerConfigurationManager _configurationManager;
         private readonly IFileSystem _fileSystem;
         private readonly ILocalizationManager _localization;
+        private readonly IBlurayExaminer _blurayExaminer;
         private readonly IConfiguration _config;
+        private readonly IServerConfigurationManager _serverConfig;
         private readonly string _startupOptionFFmpegPath;
 
-        private readonly SemaphoreSlim _thumbnailResourcePool = new SemaphoreSlim(2, 2);
+        private readonly SemaphoreSlim _thumbnailResourcePool;
 
         private readonly object _runningProcessesLock = new object();
         private readonly List<ProcessWrapper> _runningProcesses = new List<ProcessWrapper>();
@@ -67,9 +71,22 @@ namespace MediaBrowser.MediaEncoding.Encoder
         private List<string> _filters = new List<string>();
         private IDictionary<int, bool> _filtersWithOption = new Dictionary<int, bool>();
 
+        private bool _isPkeyPauseSupported = false;
+
         private bool _isVaapiDeviceAmd = false;
         private bool _isVaapiDeviceInteliHD = false;
         private bool _isVaapiDeviceInteli965 = false;
+        private bool _isVaapiDeviceSupportVulkanFmtModifier = false;
+
+        private static string[] _vulkanFmtModifierExts =
+        {
+            "VK_KHR_sampler_ycbcr_conversion",
+            "VK_EXT_image_drm_format_modifier",
+            "VK_KHR_external_memory_fd",
+            "VK_EXT_external_memory_dma_buf",
+            "VK_KHR_external_semaphore_fd",
+            "VK_EXT_external_memory_host"
+        };
 
         private Version _ffmpegVersion = null;
         private string _ffmpegPath = string.Empty;
@@ -80,16 +97,25 @@ namespace MediaBrowser.MediaEncoding.Encoder
             ILogger<MediaEncoder> logger,
             IServerConfigurationManager configurationManager,
             IFileSystem fileSystem,
+            IBlurayExaminer blurayExaminer,
             ILocalizationManager localization,
-            IConfiguration config)
+            IConfiguration config,
+            IServerConfigurationManager serverConfig)
         {
             _logger = logger;
             _configurationManager = configurationManager;
             _fileSystem = fileSystem;
+            _blurayExaminer = blurayExaminer;
             _localization = localization;
             _config = config;
+            _serverConfig = serverConfig;
             _startupOptionFFmpegPath = config.GetValue<string>(Controller.Extensions.ConfigurationExtensions.FfmpegPathKey) ?? string.Empty;
-            _jsonSerializerOptions = JsonDefaults.Options;
+
+            _jsonSerializerOptions = new JsonSerializerOptions(JsonDefaults.Options);
+            _jsonSerializerOptions.Converters.Add(new JsonBoolStringConverter());
+
+            var semaphoreCount = 2 * Environment.ProcessorCount;
+            _thumbnailResourcePool = new SemaphoreSlim(semaphoreCount, semaphoreCount);
         }
 
         /// <inheritdoc />
@@ -98,13 +124,26 @@ namespace MediaBrowser.MediaEncoding.Encoder
         /// <inheritdoc />
         public string ProbePath => _ffprobePath;
 
+        /// <inheritdoc />
         public Version EncoderVersion => _ffmpegVersion;
 
+        /// <inheritdoc />
+        public bool IsPkeyPauseSupported => _isPkeyPauseSupported;
+
+        /// <inheritdoc />
         public bool IsVaapiDeviceAmd => _isVaapiDeviceAmd;
 
+        /// <inheritdoc />
         public bool IsVaapiDeviceInteliHD => _isVaapiDeviceInteliHD;
 
+        /// <inheritdoc />
         public bool IsVaapiDeviceInteli965 => _isVaapiDeviceInteli965;
+
+        /// <inheritdoc />
+        public bool IsVaapiDeviceSupportVulkanFmtModifier => _isVaapiDeviceSupportVulkanFmtModifier;
+
+        [GeneratedRegex(@"[^\/\\]+?(\.[^\/\\\n.]+)?$")]
+        private static partial Regex FfprobePathRegex();
 
         /// <summary>
         /// Run at startup or if the user removes a Custom path from transcode page.
@@ -137,10 +176,10 @@ namespace MediaBrowser.MediaEncoding.Encoder
             _configurationManager.SaveConfiguration("encoding", options);
 
             // Only if mpeg path is set, try and set path to probe
-            if (_ffmpegPath != null)
+            if (_ffmpegPath is not null)
             {
                 // Determine a probe path from the mpeg path
-                _ffprobePath = Regex.Replace(_ffmpegPath, @"[^\/\\]+?(\.[^\/\\\n.]+)?$", @"ffprobe$1");
+                _ffprobePath = FfprobePathRegex().Replace(_ffmpegPath, @"ffprobe$1");
 
                 // Interrogate to understand what coders are supported
                 var validator = new EncoderValidator(_logger, _ffmpegPath);
@@ -154,6 +193,8 @@ namespace MediaBrowser.MediaEncoding.Encoder
 
                 _threads = EncodingHelper.GetNumberOfThreads(null, options, null);
 
+                _isPkeyPauseSupported = validator.CheckSupportedRuntimeKey("p      pause transcoding");
+
                 // Check the Vaapi device vendor
                 if (OperatingSystem.IsLinux()
                     && SupportsHwaccel("vaapi")
@@ -163,6 +204,8 @@ namespace MediaBrowser.MediaEncoding.Encoder
                     _isVaapiDeviceAmd = validator.CheckVaapiDeviceByDriverName("Mesa Gallium driver", options.VaapiDevice);
                     _isVaapiDeviceInteliHD = validator.CheckVaapiDeviceByDriverName("Intel iHD driver", options.VaapiDevice);
                     _isVaapiDeviceInteli965 = validator.CheckVaapiDeviceByDriverName("Intel i965 driver", options.VaapiDevice);
+                    _isVaapiDeviceSupportVulkanFmtModifier = validator.CheckVulkanDrmDeviceByExtensionName(options.VaapiDevice, _vulkanFmtModifierExts);
+
                     if (_isVaapiDeviceAmd)
                     {
                         _logger.LogInformation("VAAPI device {RenderNodePath} is AMD GPU", options.VaapiDevice);
@@ -174,6 +217,11 @@ namespace MediaBrowser.MediaEncoding.Encoder
                     else if (_isVaapiDeviceInteli965)
                     {
                         _logger.LogInformation("VAAPI device {RenderNodePath} is Intel GPU (i965)", options.VaapiDevice);
+                    }
+
+                    if (_isVaapiDeviceSupportVulkanFmtModifier)
+                    {
+                        _logger.LogInformation("VAAPI device {RenderNodePath} supports Vulkan DRM format modifier", options.VaapiDevice);
                     }
                 }
             }
@@ -312,26 +360,31 @@ namespace MediaBrowser.MediaEncoding.Encoder
             _ffmpegVersion = validator.GetFFmpegVersion();
         }
 
+        /// <inheritdoc />
         public bool SupportsEncoder(string encoder)
         {
             return _encoders.Contains(encoder, StringComparer.OrdinalIgnoreCase);
         }
 
+        /// <inheritdoc />
         public bool SupportsDecoder(string decoder)
         {
             return _decoders.Contains(decoder, StringComparer.OrdinalIgnoreCase);
         }
 
+        /// <inheritdoc />
         public bool SupportsHwaccel(string hwaccel)
         {
             return _hwaccels.Contains(hwaccel, StringComparer.OrdinalIgnoreCase);
         }
 
+        /// <inheritdoc />
         public bool SupportsFilter(string filter)
         {
             return _filters.Contains(filter, StringComparer.OrdinalIgnoreCase);
         }
 
+        /// <inheritdoc />
         public bool SupportsFilterWithOption(FilterOptionType option)
         {
             if (_filtersWithOption.TryGetValue((int)option, out var val))
@@ -362,74 +415,57 @@ namespace MediaBrowser.MediaEncoding.Encoder
             return true;
         }
 
-        /// <summary>
-        /// Gets the media info.
-        /// </summary>
-        /// <param name="request">The request.</param>
-        /// <param name="cancellationToken">The cancellation token.</param>
-        /// <returns>Task.</returns>
+        /// <inheritdoc />
         public Task<MediaInfo> GetMediaInfo(MediaInfoRequest request, CancellationToken cancellationToken)
         {
             var extractChapters = request.MediaType == DlnaProfileType.Video && request.ExtractChapters;
-            var inputFile = request.MediaSource.Path;
+            var analyzeDuration = string.Empty;
+            var ffmpegAnalyzeDuration = _config.GetFFmpegAnalyzeDuration() ?? string.Empty;
 
-            string analyzeDuration = string.Empty;
-            string ffmpegAnalyzeDuration = _config.GetFFmpegAnalyzeDuration() ?? string.Empty;
-
-            if (!string.IsNullOrEmpty(ffmpegAnalyzeDuration))
+            if (request.MediaSource.AnalyzeDurationMs > 0)
+            {
+                analyzeDuration = "-analyzeduration " + (request.MediaSource.AnalyzeDurationMs * 1000).ToString();
+            }
+            else if (!string.IsNullOrEmpty(ffmpegAnalyzeDuration))
             {
                 analyzeDuration = "-analyzeduration " + ffmpegAnalyzeDuration;
             }
-            else if (request.MediaSource.AnalyzeDurationMs > 0)
-            {
-                analyzeDuration = "-analyzeduration " +
-                                  (request.MediaSource.AnalyzeDurationMs * 1000).ToString();
-            }
-
-            var forceEnableLogging = request.MediaSource.Protocol != MediaProtocol.File;
 
             return GetMediaInfoInternal(
-                GetInputArgument(inputFile, request.MediaSource),
+                GetInputArgument(request.MediaSource.Path, request.MediaSource),
                 request.MediaSource.Path,
                 request.MediaSource.Protocol,
                 extractChapters,
                 analyzeDuration,
                 request.MediaType == DlnaProfileType.Audio,
                 request.MediaSource.VideoType,
-                forceEnableLogging,
                 cancellationToken);
         }
 
-        /// <summary>
-        /// Gets the input argument.
-        /// </summary>
-        /// <param name="inputFile">The input file.</param>
-        /// <param name="mediaSource">The mediaSource.</param>
-        /// <returns>System.String.</returns>
-        /// <exception cref="ArgumentException">Unrecognized InputType.</exception>
+        /// <inheritdoc />
+        public string GetInputArgument(IReadOnlyList<string> inputFiles, MediaSourceInfo mediaSource)
+        {
+            return EncodingUtils.GetInputArgument("file", inputFiles, mediaSource.Protocol);
+        }
+
+        /// <inheritdoc />
         public string GetInputArgument(string inputFile, MediaSourceInfo mediaSource)
         {
             var prefix = "file";
-            if (mediaSource.VideoType == VideoType.BluRay
-                || mediaSource.IsoType == IsoType.BluRay)
+            if (mediaSource.IsoType == IsoType.BluRay)
             {
                 prefix = "bluray";
             }
 
-            return EncodingUtils.GetInputArgument(prefix, inputFile, mediaSource.Protocol);
+            return EncodingUtils.GetInputArgument(prefix, new[] { inputFile }, mediaSource.Protocol);
         }
 
-        /// <summary>
-        /// Gets the input argument for an external subtitle file.
-        /// </summary>
-        /// <param name="inputFile">The input file.</param>
-        /// <returns>System.String.</returns>
-        /// <exception cref="ArgumentException">Unrecognized InputType.</exception>
+        /// <inheritdoc />
         public string GetExternalSubtitleInputArgument(string inputFile)
         {
             const string Prefix = "file";
 
-            return EncodingUtils.GetInputArgument(Prefix, inputFile, MediaProtocol.File);
+            return EncodingUtils.GetInputArgument(Prefix, new[] { inputFile }, MediaProtocol.File);
         }
 
         /// <summary>
@@ -444,7 +480,6 @@ namespace MediaBrowser.MediaEncoding.Encoder
             string probeSizeArgument,
             bool isAudio,
             VideoType? videoType,
-            bool forceEnableLogging,
             CancellationToken cancellationToken)
         {
             var args = extractChapters
@@ -459,7 +494,7 @@ namespace MediaBrowser.MediaEncoding.Encoder
                     CreateNoWindow = true,
                     UseShellExecute = false,
 
-                    // Must consume both or ffmpeg may hang due to deadlocks. See comments below.
+                    // Must consume both or ffmpeg may hang due to deadlocks.
                     RedirectStandardOutput = true,
 
                     FileName = _ffprobePath,
@@ -471,21 +506,14 @@ namespace MediaBrowser.MediaEncoding.Encoder
                 EnableRaisingEvents = true
             };
 
-            if (forceEnableLogging)
-            {
-                _logger.LogInformation("{ProcessFileName} {ProcessArgs}", process.StartInfo.FileName, process.StartInfo.Arguments);
-            }
-            else
-            {
-                _logger.LogDebug("{ProcessFileName} {ProcessArgs}", process.StartInfo.FileName, process.StartInfo.Arguments);
-            }
+            _logger.LogInformation("Starting {ProcessFileName} with args {ProcessArgs}", _ffprobePath, args);
 
+            var memoryStream = new MemoryStream();
+            await using (memoryStream.ConfigureAwait(false))
             using (var processWrapper = new ProcessWrapper(process, this))
             {
-                await using var memoryStream = new MemoryStream();
-                _logger.LogDebug("Starting ffprobe with args {Args}", args);
                 StartProcess(processWrapper);
-                await process.StandardOutput.BaseStream.CopyToAsync(memoryStream, cancellationToken: cancellationToken);
+                await process.StandardOutput.BaseStream.CopyToAsync(memoryStream, cancellationToken).ConfigureAwait(false);
                 memoryStream.Seek(0, SeekOrigin.Begin);
                 InternalMediaInfoResult result;
                 try
@@ -493,7 +521,7 @@ namespace MediaBrowser.MediaEncoding.Encoder
                     result = await JsonSerializer.DeserializeAsync<InternalMediaInfoResult>(
                                         memoryStream,
                                         _jsonSerializerOptions,
-                                        cancellationToken: cancellationToken).ConfigureAwait(false);
+                                        cancellationToken).ConfigureAwait(false);
                 }
                 catch
                 {
@@ -502,12 +530,12 @@ namespace MediaBrowser.MediaEncoding.Encoder
                     throw;
                 }
 
-                if (result == null || (result.Streams == null && result.Format == null))
+                if (result is null || (result.Streams is null && result.Format is null))
                 {
                     throw new FfmpegException("ffprobe failed - streams and format are both null.");
                 }
 
-                if (result.Streams != null)
+                if (result.Streams is not null)
                 {
                     // Normalize aspect ratio if invalid
                     foreach (var stream in result.Streams)
@@ -528,6 +556,7 @@ namespace MediaBrowser.MediaEncoding.Encoder
             }
         }
 
+        /// <inheritdoc />
         public Task<string> ExtractAudioImage(string path, int? imageStreamIndex, CancellationToken cancellationToken)
         {
             var mediaSource = new MediaSourceInfo
@@ -538,11 +567,13 @@ namespace MediaBrowser.MediaEncoding.Encoder
             return ExtractImage(path, null, null, imageStreamIndex, mediaSource, true, null, null, ImageFormat.Jpg, cancellationToken);
         }
 
+        /// <inheritdoc />
         public Task<string> ExtractVideoImage(string inputFile, string container, MediaSourceInfo mediaSource, MediaStream videoStream, Video3DFormat? threedFormat, TimeSpan? offset, CancellationToken cancellationToken)
         {
             return ExtractImage(inputFile, container, videoStream, null, mediaSource, false, threedFormat, offset, ImageFormat.Jpg, cancellationToken);
         }
 
+        /// <inheritdoc />
         public Task<string> ExtractVideoImage(string inputFile, string container, MediaSourceInfo mediaSource, MediaStream imageStream, int? imageStreamIndex, ImageFormat? targetFormat, CancellationToken cancellationToken)
         {
             return ExtractImage(inputFile, container, imageStream, imageStreamIndex, mediaSource, false, null, null, targetFormat, cancellationToken);
@@ -581,12 +612,34 @@ namespace MediaBrowser.MediaEncoding.Encoder
             return await ExtractImageInternal(inputArgument, container, videoStream, imageStreamIndex, threedFormat, offset, false, targetFormat, cancellationToken).ConfigureAwait(false);
         }
 
+        private string GetImageResolutionParameter()
+        {
+            string imageResolutionParameter;
+
+            imageResolutionParameter = _serverConfig.Configuration.ChapterImageResolution switch
+            {
+                ImageResolution.P144 => "256x144",
+                ImageResolution.P240 => "426x240",
+                ImageResolution.P360 => "640x360",
+                ImageResolution.P480 => "854x480",
+                ImageResolution.P720 => "1280x720",
+                ImageResolution.P1080 => "1920x1080",
+                ImageResolution.P1440 => "2560x1440",
+                ImageResolution.P2160 => "3840x2160",
+                _ => string.Empty
+            };
+
+            if (!string.IsNullOrEmpty(imageResolutionParameter))
+            {
+                imageResolutionParameter = " -s " + imageResolutionParameter;
+            }
+
+            return imageResolutionParameter;
+        }
+
         private async Task<string> ExtractImageInternal(string inputPath, string container, MediaStream videoStream, int? imageStreamIndex, Video3DFormat? threedFormat, TimeSpan? offset, bool useIFrame, ImageFormat? targetFormat, CancellationToken cancellationToken)
         {
-            if (string.IsNullOrEmpty(inputPath))
-            {
-                throw new ArgumentNullException(nameof(inputPath));
-            }
+            ArgumentException.ThrowIfNullOrEmpty(inputPath);
 
             var outputExtension = targetFormat switch
             {
@@ -606,7 +659,7 @@ namespace MediaBrowser.MediaEncoding.Encoder
             var filters = new List<string>();
 
             // deinterlace using bwdif algorithm for video stream.
-            if (videoStream != null && videoStream.IsInterlaced)
+            if (videoStream is not null && videoStream.IsInterlaced)
             {
                 filters.Add("bwdif=0:-1:0");
             }
@@ -651,7 +704,7 @@ namespace MediaBrowser.MediaEncoding.Encoder
 
             var vf = string.Join(',', filters);
             var mapArg = imageStreamIndex.HasValue ? (" -map 0:" + imageStreamIndex.Value.ToString(CultureInfo.InvariantCulture)) : string.Empty;
-            var args = string.Format(CultureInfo.InvariantCulture, "-i {0}{3} -threads {4} -v quiet -vframes 1 -vf {2} -f image2 \"{1}\"", inputPath, tempExtractPath, vf, mapArg, _threads);
+            var args = string.Format(CultureInfo.InvariantCulture, "-i {0}{3} -threads {4} -v quiet -vframes 1 -vf {2}{5} -f image2 \"{1}\"", inputPath, tempExtractPath, vf, mapArg, _threads, GetImageResolutionParameter());
 
             if (offset.HasValue)
             {
@@ -724,6 +777,7 @@ namespace MediaBrowser.MediaEncoding.Encoder
             }
         }
 
+        /// <inheritdoc />
         public string GetTimeParameter(long ticks)
         {
             var time = TimeSpan.FromTicks(ticks);
@@ -823,82 +877,111 @@ namespace MediaBrowser.MediaEncoding.Encoder
         }
 
         /// <inheritdoc />
-        public IEnumerable<string> GetPrimaryPlaylistVobFiles(string path, uint? titleNumber)
+        public IReadOnlyList<string> GetPrimaryPlaylistVobFiles(string path, uint? titleNumber)
         {
-            // min size 300 mb
-            const long MinPlayableSize = 314572800;
-
-            // Try to eliminate menus and intros by skipping all files at the front of the list that are less than the minimum size
-            // Once we reach a file that is at least the minimum, return all subsequent ones
+            // Eliminate menus and intros by omitting VIDEO_TS.VOB and all subsequent title .vob files ending with _0.VOB
             var allVobs = _fileSystem.GetFiles(path, true)
-                .Where(file => string.Equals(file.Extension, ".vob", StringComparison.OrdinalIgnoreCase))
+                .Where(file => string.Equals(file.Extension, ".VOB", StringComparison.OrdinalIgnoreCase))
+                .Where(file => !string.Equals(file.Name, "VIDEO_TS.VOB", StringComparison.OrdinalIgnoreCase))
+                .Where(file => !file.Name.EndsWith("_0.VOB", StringComparison.OrdinalIgnoreCase))
                 .OrderBy(i => i.FullName)
                 .ToList();
 
-            // If we didn't find any satisfying the min length, just take them all
-            if (allVobs.Count == 0)
-            {
-                _logger.LogWarning("No vobs found in dvd structure.");
-                return Enumerable.Empty<string>();
-            }
-
             if (titleNumber.HasValue)
             {
-                var prefix = string.Format(
-                    CultureInfo.InvariantCulture,
-                    titleNumber.Value >= 10 ? "VTS_{0}_" : "VTS_0{0}_",
-                    titleNumber.Value);
+                var prefix = string.Format(CultureInfo.InvariantCulture, "VTS_{0:D2}_", titleNumber.Value);
                 var vobs = allVobs.Where(i => i.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToList();
 
                 if (vobs.Count > 0)
                 {
-                    var minSizeVobs = vobs
-                        .SkipWhile(f => f.Length < MinPlayableSize)
-                        .ToList();
-
-                    return minSizeVobs.Count == 0 ? vobs.Select(i => i.FullName) : minSizeVobs.Select(i => i.FullName);
+                    return vobs.Select(i => i.FullName).ToList();
                 }
 
-                _logger.LogWarning("Could not determine vob file list for {Path} using DvdLib. Will scan using file sizes.", path);
+                _logger.LogWarning("Could not determine .vob files for title {Title} of {Path}.", titleNumber, path);
             }
 
-            var files = allVobs
-                .SkipWhile(f => f.Length < MinPlayableSize)
+            // Check for multiple big titles (> 900 MB)
+            var titles = allVobs
+                .Where(vob => vob.Length >= 900 * 1024 * 1024)
+                .Select(vob => _fileSystem.GetFileNameWithoutExtension(vob).AsSpan().RightPart('_').ToString())
+                .Distinct()
                 .ToList();
 
-            // If we didn't find any satisfying the min length, just take them all
-            if (files.Count == 0)
+            // Fall back to first title if no big title is found
+            if (titles.Count == 0)
             {
-                _logger.LogWarning("Vob size filter resulted in zero matches. Taking all vobs.");
-                files = allVobs;
+                titles.Add(_fileSystem.GetFileNameWithoutExtension(allVobs[0]).AsSpan().RightPart('_').ToString());
             }
 
-            // Assuming they're named "vts_05_01", take all files whose second part matches that of the first file
-            if (files.Count > 0)
+            // Aggregate all .vob files of the titles
+            return allVobs
+                .Where(vob => titles.Contains(_fileSystem.GetFileNameWithoutExtension(vob).AsSpan().RightPart('_').ToString()))
+                .Select(i => i.FullName)
+                .ToList();
+        }
+
+        /// <inheritdoc />
+        public IReadOnlyList<string> GetPrimaryPlaylistM2tsFiles(string path)
+        {
+            // Get all playable .m2ts files
+            var validPlaybackFiles = _blurayExaminer.GetDiscInfo(path).Files;
+
+            // Get all files from the BDMV/STREAMING directory
+            var directoryFiles = _fileSystem.GetFiles(Path.Join(path, "BDMV", "STREAM"));
+
+            // Only return playable local .m2ts files
+            return directoryFiles
+                .Where(f => validPlaybackFiles.Contains(f.Name, StringComparer.OrdinalIgnoreCase))
+                .Select(f => f.FullName)
+                .ToList();
+        }
+
+        /// <inheritdoc />
+        public void GenerateConcatConfig(MediaSourceInfo source, string concatFilePath)
+        {
+            // Get all playable files
+            IReadOnlyList<string> files;
+            var videoType = source.VideoType;
+            if (videoType == VideoType.Dvd)
             {
-                var parts = _fileSystem.GetFileNameWithoutExtension(files[0]).Split('_');
+                files = GetPrimaryPlaylistVobFiles(source.Path, null);
+            }
+            else if (videoType == VideoType.BluRay)
+            {
+                files = GetPrimaryPlaylistM2tsFiles(source.Path);
+            }
+            else
+            {
+                return;
+            }
 
-                if (parts.Length == 3)
+            // Generate concat configuration entries for each file and write to file
+            using (StreamWriter sw = new StreamWriter(concatFilePath))
+            {
+                foreach (var path in files)
                 {
-                    var title = parts[1];
+                    var mediaInfoResult = GetMediaInfo(
+                        new MediaInfoRequest
+                        {
+                            MediaType = DlnaProfileType.Video,
+                            MediaSource = new MediaSourceInfo
+                            {
+                                Path = path,
+                                Protocol = MediaProtocol.File,
+                                VideoType = videoType
+                            }
+                        },
+                        CancellationToken.None).GetAwaiter().GetResult();
 
-                    files = files.TakeWhile(f =>
-                    {
-                        var fileParts = _fileSystem.GetFileNameWithoutExtension(f).Split('_');
+                    var duration = TimeSpan.FromTicks(mediaInfoResult.RunTimeTicks.Value).TotalSeconds;
 
-                        return fileParts.Length == 3 && string.Equals(title, fileParts[1], StringComparison.OrdinalIgnoreCase);
-                    }).ToList();
+                    // Add file path stanza to concat configuration
+                    sw.WriteLine("file '{0}'", path);
 
-                    // If this resulted in not getting any vobs, just take them all
-                    if (files.Count == 0)
-                    {
-                        _logger.LogWarning("Vob filename filter resulted in zero matches. Taking all vobs.");
-                        files = allVobs;
-                    }
+                    // Add duration stanza to concat configuration
+                    sw.WriteLine("duration {0}", duration);
                 }
             }
-
-            return files.Select(i => i.FullName);
         }
 
         public bool CanExtractSubtitles(string codec)
@@ -963,7 +1046,7 @@ namespace MediaBrowser.MediaEncoding.Encoder
             {
                 if (!_disposed)
                 {
-                    if (Process != null)
+                    if (Process is not null)
                     {
                         Process.Exited -= OnProcessExited;
                         DisposeProcess(Process);

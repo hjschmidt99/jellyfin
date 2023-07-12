@@ -31,13 +31,14 @@ namespace MediaBrowser.Providers.MediaInfo
             "poster",
             "folder",
             "cover",
-            "default"
+            "default",
+            "movie",
+            "show"
         };
 
         private static readonly string[] _backdropImageFileNames =
         {
             "backdrop",
-            "fanart",
             "background",
             "art"
         };
@@ -137,9 +138,9 @@ namespace MediaBrowser.Providers.MediaInfo
                 .FirstOrDefault(attachment => !string.IsNullOrEmpty(attachment.FileName)
                     && imageFileNames.Any(name => attachment.FileName.Contains(name, StringComparison.OrdinalIgnoreCase)));
 
-            if (attachmentStream != null)
+            if (attachmentStream is not null)
             {
-                return await ExtractAttachment(item, attachmentStream, mediaSource, cancellationToken);
+                return await ExtractAttachment(item, attachmentStream, mediaSource, cancellationToken).ConfigureAwait(false);
             }
 
             // Fall back to EmbeddedImage streams
@@ -161,7 +162,7 @@ namespace MediaBrowser.Providers.MediaInfo
                     && imageFileNames.Any(name => stream.Comment.Contains(name, StringComparison.OrdinalIgnoreCase)));
 
             // Primary type only: default to first image if none found by label
-            if (imageStream == null)
+            if (imageStream is null)
             {
                 if (type == ImageType.Primary)
                 {

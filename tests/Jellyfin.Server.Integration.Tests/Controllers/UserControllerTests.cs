@@ -46,6 +46,7 @@ namespace Jellyfin.Server.Integration.Tests.Controllers
             var users = await JsonSerializer.DeserializeAsync<UserDto[]>(
                 await response.Content.ReadAsStreamAsync().ConfigureAwait(false), _jsonOpions).ConfigureAwait(false);
             // User are hidden by default
+            Assert.NotNull(users);
             Assert.Empty(users);
         }
 
@@ -60,8 +61,19 @@ namespace Jellyfin.Server.Integration.Tests.Controllers
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             var users = await JsonSerializer.DeserializeAsync<UserDto[]>(
                 await response.Content.ReadAsStreamAsync().ConfigureAwait(false), _jsonOpions).ConfigureAwait(false);
+            Assert.NotNull(users);
             Assert.Single(users);
             Assert.False(users![0].HasConfiguredPassword);
+        }
+
+        [Fact]
+        [Priority(-1)]
+        public async Task Me_Valid_Success()
+        {
+            var client = _factory.CreateClient();
+            client.DefaultRequestHeaders.AddAuthHeader(_accessToken ??= await AuthHelper.CompleteStartupAsync(client).ConfigureAwait(false));
+
+            _ = await AuthHelper.GetUserDtoAsync(client).ConfigureAwait(false);
         }
 
         [Fact]
@@ -106,11 +118,24 @@ namespace Jellyfin.Server.Integration.Tests.Controllers
 
             var createRequest = new CreateUserByName()
             {
-                Name = username
+                Name = username!
             };
 
             using var response = await CreateUserByName(client, createRequest).ConfigureAwait(false);
             Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        }
+
+        [Fact]
+        [Priority(0)]
+        public async Task Delete_DoesntExist_NotFound()
+        {
+            var client = _factory.CreateClient();
+
+            // access token can't be null here as the previous test populated it
+            client.DefaultRequestHeaders.AddAuthHeader(_accessToken!);
+
+            using var response = await client.DeleteAsync($"User/{Guid.NewGuid()}").ConfigureAwait(false);
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         }
 
         [Fact]

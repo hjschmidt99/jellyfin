@@ -76,6 +76,8 @@ namespace MediaBrowser.Model.Dto
 
         public bool? CanDownload { get; set; }
 
+        public bool? HasLyrics { get; set; }
+
         public bool? HasSubtitles { get; set; }
 
         public string PreferredMetadataLanguage { get; set; }
@@ -776,6 +778,12 @@ namespace MediaBrowser.Model.Dto
         /// </summary>
         /// <value>The timer identifier.</value>
         public string TimerId { get; set; }
+
+        /// <summary>
+        /// Gets or sets the LUFS value.
+        /// </summary>
+        /// <value>The LUFS Value.</value>
+        public float? LUFS { get; set; }
 
         /// <summary>
         /// Gets or sets the current program.

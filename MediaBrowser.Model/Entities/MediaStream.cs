@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Text;
+using Jellyfin.Data.Enums;
 using Jellyfin.Extensions;
 using MediaBrowser.Model.Dlna;
 using MediaBrowser.Model.Extensions;
@@ -148,7 +149,7 @@ namespace MediaBrowser.Model.Entities
         /// Gets the video range.
         /// </summary>
         /// <value>The video range.</value>
-        public string VideoRange
+        public VideoRange VideoRange
         {
             get
             {
@@ -162,7 +163,7 @@ namespace MediaBrowser.Model.Entities
         /// Gets the video range type.
         /// </summary>
         /// <value>The video range type.</value>
-        public string VideoRangeType
+        public VideoRangeType VideoRangeType
         {
             get
             {
@@ -220,6 +221,8 @@ namespace MediaBrowser.Model.Entities
         public string LocalizedForced { get; set; }
 
         public string LocalizedExternal { get; set; }
+
+        public string LocalizedHearingImpaired { get; set; }
 
         public string DisplayTitle
         {
@@ -304,9 +307,9 @@ namespace MediaBrowser.Model.Entities
                             attributes.Add(Codec.ToUpperInvariant());
                         }
 
-                        if (!string.IsNullOrEmpty(VideoRange))
+                        if (VideoRange != VideoRange.Unknown)
                         {
-                            attributes.Add(VideoRange.ToUpperInvariant());
+                            attributes.Add(VideoRange.ToString());
                         }
 
                         if (!string.IsNullOrEmpty(Title))
@@ -343,6 +346,11 @@ namespace MediaBrowser.Model.Entities
                         else
                         {
                             attributes.Add(string.IsNullOrEmpty(LocalizedUndefined) ? "Und" : LocalizedUndefined);
+                        }
+
+                        if (IsHearingImpaired)
+                        {
+                            attributes.Add(string.IsNullOrEmpty(LocalizedHearingImpaired) ? "Hearing Impaired" : LocalizedHearingImpaired);
                         }
 
                         if (IsDefault)
@@ -452,6 +460,12 @@ namespace MediaBrowser.Model.Entities
         /// </summary>
         /// <value><c>true</c> if this instance is forced; otherwise, <c>false</c>.</value>
         public bool IsForced { get; set; }
+
+        /// <summary>
+        /// Gets or sets a value indicating whether this instance is for the hearing impaired.
+        /// </summary>
+        /// <value><c>true</c> if this instance is for the hearing impaired; otherwise, <c>false</c>.</value>
+        public bool IsHearingImpaired { get; set; }
 
         /// <summary>
         /// Gets or sets the height.
@@ -622,11 +636,12 @@ namespace MediaBrowser.Model.Entities
 
             // sub = external .sub file
 
-            return !codec.Contains("pgs", StringComparison.OrdinalIgnoreCase) &&
-                   !codec.Contains("dvd", StringComparison.OrdinalIgnoreCase) &&
-                   !codec.Contains("dvbsub", StringComparison.OrdinalIgnoreCase) &&
-                   !string.Equals(codec, "sub", StringComparison.OrdinalIgnoreCase) &&
-                   !string.Equals(codec, "dvb_subtitle", StringComparison.OrdinalIgnoreCase);
+            return !codec.Contains("pgs", StringComparison.OrdinalIgnoreCase)
+                   && !codec.Contains("dvd", StringComparison.OrdinalIgnoreCase)
+                   && !codec.Contains("dvbsub", StringComparison.OrdinalIgnoreCase)
+                   && !string.Equals(codec, "sub", StringComparison.OrdinalIgnoreCase)
+                   && !string.Equals(codec, "sup", StringComparison.OrdinalIgnoreCase)
+                   && !string.Equals(codec, "dvb_subtitle", StringComparison.OrdinalIgnoreCase);
         }
 
         public bool SupportsSubtitleConversionTo(string toCodec)
@@ -663,23 +678,23 @@ namespace MediaBrowser.Model.Entities
             return true;
         }
 
-        public (string VideoRange, string VideoRangeType) GetVideoColorRange()
+        public (VideoRange VideoRange, VideoRangeType VideoRangeType) GetVideoColorRange()
         {
             if (Type != MediaStreamType.Video)
             {
-                return (null, null);
+                return (VideoRange.Unknown, VideoRangeType.Unknown);
             }
 
             var colorTransfer = ColorTransfer;
 
             if (string.Equals(colorTransfer, "smpte2084", StringComparison.OrdinalIgnoreCase))
             {
-                return ("HDR", "HDR10");
+                return (VideoRange.HDR, VideoRangeType.HDR10);
             }
 
             if (string.Equals(colorTransfer, "arib-std-b67", StringComparison.OrdinalIgnoreCase))
             {
-                return ("HDR", "HLG");
+                return (VideoRange.HDR, VideoRangeType.HLG);
             }
 
             var codecTag = CodecTag;
@@ -697,10 +712,10 @@ namespace MediaBrowser.Model.Entities
                 || string.Equals(codecTag, "dvhe", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(codecTag, "dav1", StringComparison.OrdinalIgnoreCase))
             {
-                return ("HDR", "DOVI");
+                return (VideoRange.HDR, VideoRangeType.DOVI);
             }
 
-            return ("SDR", "SDR");
+            return (VideoRange.SDR, VideoRangeType.SDR);
         }
     }
 }

@@ -35,7 +35,7 @@ namespace Emby.Dlna.Eventing
         public EventSubscriptionResponse RenewEventSubscription(string subscriptionId, string notificationType, string requestedTimeoutString, string callbackUrl)
         {
             var subscription = GetSubscription(subscriptionId, false);
-            if (subscription != null)
+            if (subscription is not null)
             {
                 subscription.TimeoutSeconds = ParseTimeout(requestedTimeoutString) ?? 300;
                 int timeoutSeconds = subscription.TimeoutSeconds;
@@ -127,8 +127,7 @@ namespace Emby.Dlna.Eventing
         public Task TriggerEvent(string notificationType, IDictionary<string, string> stateVariables)
         {
             var subs = _subscriptions.Values
-                .Where(i => !i.IsExpired && string.Equals(notificationType, i.NotificationType, StringComparison.OrdinalIgnoreCase))
-                .ToList();
+                .Where(i => !i.IsExpired && string.Equals(notificationType, i.NotificationType, StringComparison.OrdinalIgnoreCase));
 
             var tasks = subs.Select(i => TriggerEvent(i, stateVariables));
 
@@ -165,7 +164,7 @@ namespace Emby.Dlna.Eventing
 
             try
             {
-                using var response = await _httpClientFactory.CreateClient(NamedClient.Default)
+                using var response = await _httpClientFactory.CreateClient(NamedClient.DirectIp)
                     .SendAsync(options, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
             }
             catch (OperationCanceledException)

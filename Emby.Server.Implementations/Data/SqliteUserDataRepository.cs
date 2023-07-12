@@ -7,7 +7,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using Jellyfin.Data.Entities;
-using MediaBrowser.Common.Configuration;
+using MediaBrowser.Controller.Configuration;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Persistence;
@@ -18,33 +18,32 @@ namespace Emby.Server.Implementations.Data
 {
     public class SqliteUserDataRepository : BaseSqliteRepository, IUserDataRepository
     {
+        private readonly IUserManager _userManager;
+
         public SqliteUserDataRepository(
             ILogger<SqliteUserDataRepository> logger,
-            IApplicationPaths appPaths)
+            IServerConfigurationManager config,
+            IUserManager userManager)
             : base(logger)
         {
-            DbFilePath = Path.Combine(appPaths.DataPath, "library.db");
+            _userManager = userManager;
+
+            DbFilePath = Path.Combine(config.ApplicationPaths.DataPath, "library.db");
         }
 
         /// <summary>
         /// Opens the connection to the database.
         /// </summary>
-        /// <param name="userManager">The user manager.</param>
-        /// <param name="dbLock">The lock to use for database IO.</param>
-        /// <param name="dbConnection">The connection to use for database IO.</param>
-        public void Initialize(IUserManager userManager, SemaphoreSlim dbLock, SQLiteDatabaseConnection dbConnection)
+        public override void Initialize()
         {
-            WriteLock.Dispose();
-            WriteLock = dbLock;
-            WriteConnection?.Dispose();
-            WriteConnection = dbConnection;
+            base.Initialize();
 
             using (var connection = GetConnection())
             {
                 var userDatasTableExists = TableExists(connection, "UserDatas");
                 var userDataTableExists = TableExists(connection, "userdata");
 
-                var users = userDatasTableExists ? null : userManager.Users;
+                var users = userDatasTableExists ? null : _userManager.Users;
 
                 connection.RunInTransaction(
                     db =>
@@ -133,20 +132,14 @@ namespace Emby.Server.Implementations.Data
         /// <inheritdoc />
         public void SaveUserData(long userId, string key, UserItemData userData, CancellationToken cancellationToken)
         {
-            if (userData == null)
-            {
-                throw new ArgumentNullException(nameof(userData));
-            }
+            ArgumentNullException.ThrowIfNull(userData);
 
             if (userId <= 0)
             {
                 throw new ArgumentNullException(nameof(userId));
             }
 
-            if (string.IsNullOrEmpty(key))
-            {
-                throw new ArgumentNullException(nameof(key));
-            }
+            ArgumentException.ThrowIfNullOrEmpty(key);
 
             PersistUserData(userId, key, userData, cancellationToken);
         }
@@ -154,10 +147,7 @@ namespace Emby.Server.Implementations.Data
         /// <inheritdoc />
         public void SaveAllUserData(long userId, UserItemData[] userData, CancellationToken cancellationToken)
         {
-            if (userData == null)
-            {
-                throw new ArgumentNullException(nameof(userData));
-            }
+            ArgumentNullException.ThrowIfNull(userData);
 
             if (userId <= 0)
             {
@@ -280,10 +270,7 @@ namespace Emby.Server.Implementations.Data
                 throw new ArgumentNullException(nameof(userId));
             }
 
-            if (string.IsNullOrEmpty(key))
-            {
-                throw new ArgumentNullException(nameof(key));
-            }
+            ArgumentException.ThrowIfNullOrEmpty(key);
 
             using (var connection = GetConnection(true))
             {
@@ -304,10 +291,7 @@ namespace Emby.Server.Implementations.Data
 
         public UserItemData GetUserData(long userId, List<string> keys)
         {
-            if (keys == null)
-            {
-                throw new ArgumentNullException(nameof(keys));
-            }
+            ArgumentNullException.ThrowIfNull(keys);
 
             if (keys.Count == 0)
             {
@@ -386,20 +370,5 @@ namespace Emby.Server.Implementations.Data
 
             return userData;
         }
-
-#pragma warning disable CA2215
-        /// <inheritdoc/>
-        /// <remarks>
-        /// There is nothing to dispose here since <see cref="BaseSqliteRepository.WriteLock"/> and
-        /// <see cref="BaseSqliteRepository.WriteConnection"/> are managed by <see cref="SqliteItemRepository"/>.
-        /// See <see cref="Initialize(IUserManager, SemaphoreSlim, SQLiteDatabaseConnection)"/>.
-        /// </remarks>
-        protected override void Dispose(bool dispose)
-        {
-            // The write lock and connection for the item repository are shared with the user data repository
-            // since they point to the same database. The item repo has responsibility for disposing these two objects,
-            // so the user data repo should not attempt to dispose them as well
-        }
-#pragma warning restore CA2215
     }
 }

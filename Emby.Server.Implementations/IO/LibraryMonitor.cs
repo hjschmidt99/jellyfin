@@ -71,28 +71,14 @@ namespace Emby.Server.Implementations.IO
 
         public void ReportFileSystemChangeBeginning(string path)
         {
-            if (string.IsNullOrEmpty(path))
-            {
-                throw new ArgumentNullException(nameof(path));
-            }
+            ArgumentException.ThrowIfNullOrEmpty(path);
 
             TemporarilyIgnore(path);
         }
 
-        public bool IsPathLocked(string path)
-        {
-            // This method is not used by the core but it used by auto-organize
-
-            var lockedPaths = _tempIgnoredPaths.Keys.ToList();
-            return lockedPaths.Any(i => _fileSystem.AreEqual(i, path) || _fileSystem.ContainsSubPath(i, path));
-        }
-
         public async void ReportFileSystemChangeComplete(string path, bool refreshPath)
         {
-            if (string.IsNullOrEmpty(path))
-            {
-                throw new ArgumentNullException(nameof(path));
-            }
+            ArgumentException.ThrowIfNullOrEmpty(path);
 
             // This is an arbitrary amount of time, but delay it because file system writes often trigger events long after the file was actually written to.
             // Seeing long delays in some situations, especially over the network, sometimes up to 45 seconds
@@ -123,7 +109,7 @@ namespace Emby.Server.Implementations.IO
 
             var options = _libraryManager.GetLibraryOptions(item);
 
-            if (options != null)
+            if (options is not null)
             {
                 return options.EnableRealtimeMonitor;
             }
@@ -145,8 +131,7 @@ namespace Emby.Server.Implementations.IO
                 .OfType<Folder>()
                 .SelectMany(f => f.PhysicalLocations)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(i => i)
-                .ToList();
+                .Order();
 
             foreach (var path in paths)
             {
@@ -206,10 +191,7 @@ namespace Emby.Server.Implementations.IO
         /// <exception cref="ArgumentNullException"><paramref name="path"/> is <c>null</c>.</exception>
         private static bool ContainsParentFolder(IEnumerable<string> lst, string path)
         {
-            if (string.IsNullOrEmpty(path))
-            {
-                throw new ArgumentNullException(nameof(path));
-            }
+            ArgumentException.ThrowIfNullOrEmpty(path);
 
             path = path.TrimEnd(Path.DirectorySeparatorChar);
 
@@ -365,18 +347,12 @@ namespace Emby.Server.Implementations.IO
 
         public void ReportFileSystemChanged(string path)
         {
-            if (string.IsNullOrEmpty(path))
-            {
-                throw new ArgumentNullException(nameof(path));
-            }
+            ArgumentException.ThrowIfNullOrEmpty(path);
 
             var monitorPath = !IgnorePatterns.ShouldIgnore(path);
 
-            // Ignore certain files
-            var tempIgnorePaths = _tempIgnoredPaths.Keys.ToList();
-
-            // If the parent of an ignored path has a change event, ignore that too
-            if (tempIgnorePaths.Any(i =>
+            // Ignore certain files, If the parent of an ignored path has a change event, ignore that too
+            if (_tempIgnoredPaths.Keys.Any(i =>
             {
                 if (_fileSystem.AreEqual(i, path))
                 {
@@ -491,7 +467,7 @@ namespace Emby.Server.Implementations.IO
         {
             lock (_activeRefreshers)
             {
-                foreach (var refresher in _activeRefreshers.ToList())
+                foreach (var refresher in _activeRefreshers)
                 {
                     refresher.Completed -= OnNewRefresherCompleted;
                     refresher.Dispose();

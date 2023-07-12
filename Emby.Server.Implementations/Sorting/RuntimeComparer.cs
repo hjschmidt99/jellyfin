@@ -1,5 +1,3 @@
-#nullable disable
-
 using System;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Sorting;
@@ -24,17 +22,10 @@ namespace Emby.Server.Implementations.Sorting
         /// <param name="x">The x.</param>
         /// <param name="y">The y.</param>
         /// <returns>System.Int32.</returns>
-        public int Compare(BaseItem x, BaseItem y)
+        public int Compare(BaseItem? x, BaseItem? y)
         {
-            if (x == null)
-            {
-                throw new ArgumentNullException(nameof(x));
-            }
-
-            if (y == null)
-            {
-                throw new ArgumentNullException(nameof(y));
-            }
+            ArgumentNullException.ThrowIfNull(x);
+            ArgumentNullException.ThrowIfNull(y);
 
             return (x.RunTimeTicks ?? 0).CompareTo(y.RunTimeTicks ?? 0);
         }

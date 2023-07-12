@@ -114,15 +114,9 @@ namespace Emby.Dlna.ContentDirectory
         /// <inheritdoc />
         protected override void WriteResult(string methodName, IReadOnlyDictionary<string, string> methodParams, XmlWriter xmlWriter)
         {
-            if (xmlWriter == null)
-            {
-                throw new ArgumentNullException(nameof(xmlWriter));
-            }
+            ArgumentNullException.ThrowIfNull(xmlWriter);
 
-            if (methodParams == null)
-            {
-                throw new ArgumentNullException(nameof(methodParams));
-            }
+            ArgumentNullException.ThrowIfNull(methodParams);
 
             const string DeviceId = "test";
 
@@ -1054,7 +1048,7 @@ namespace Emby.Dlna.ContentDirectory
                     ParentId = parent?.Id ?? Guid.Empty,
                     GroupItems = true
                 },
-                query.DtoOptions).Select(i => i.Item1 ?? i.Item2.FirstOrDefault()).Where(i => i != null).ToArray();
+                query.DtoOptions).Select(i => i.Item1 ?? i.Item2.FirstOrDefault()).Where(i => i is not null).ToArray();
 
             return ToResult(query.StartIndex, items);
         }

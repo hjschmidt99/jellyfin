@@ -11,7 +11,7 @@ using System.Threading.Tasks;
 using Emby.Dlna.PlayTo;
 using Emby.Dlna.Ssdp;
 using Jellyfin.Networking.Configuration;
-using Jellyfin.Networking.Manager;
+using Jellyfin.Networking.Extensions;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Common.Extensions;
 using MediaBrowser.Common.Net;
@@ -199,10 +199,9 @@ namespace Emby.Dlna.Main
         {
             try
             {
-                if (_communicationsServer == null)
+                if (_communicationsServer is null)
                 {
-                    var enableMultiSocketBinding = OperatingSystem.IsWindows() ||
-                                                   OperatingSystem.IsLinux();
+                    var enableMultiSocketBinding = OperatingSystem.IsWindows() || OperatingSystem.IsLinux();
 
                     _communicationsServer = new SsdpCommunicationsServer(_socketFactory, _networkManager, _logger, enableMultiSocketBinding)
                     {
@@ -222,7 +221,7 @@ namespace Emby.Dlna.Main
         {
             try
             {
-                if (communicationsServer != null)
+                if (communicationsServer is not null)
                 {
                     ((DeviceDiscovery)_deviceDiscovery).Start(communicationsServer);
                 }
@@ -248,12 +247,7 @@ namespace Emby.Dlna.Main
 
         public void StartDevicePublisher(Configuration.DlnaOptions options)
         {
-            if (!options.BlastAliveMessages)
-            {
-                return;
-            }
-
-            if (_publisher != null)
+            if (_publisher is not null)
             {
                 return;
             }
@@ -262,8 +256,9 @@ namespace Emby.Dlna.Main
             {
                 _publisher = new SsdpDevicePublisher(
                     _communicationsServer,
-                    MediaBrowser.Common.System.OperatingSystem.Name,
-                    Environment.OSVersion.VersionString,
+                    Environment.OSVersion.Platform.ToString(),
+                    // Can not use VersionString here since that includes OS and version
+                    Environment.OSVersion.Version.ToString(),
                     _config.GetDlnaConfiguration().SendOnlyMatchedHost)
                 {
                     LogFunction = (msg) => _logger.LogDebug("{Msg}", msg),
@@ -272,7 +267,10 @@ namespace Emby.Dlna.Main
 
                 RegisterServerEndpoints();
 
-                _publisher.StartBroadcastingAliveMessages(TimeSpan.FromSeconds(options.BlastAliveMessageIntervalSeconds));
+                if (options.BlastAliveMessages)
+                {
+                    _publisher.StartSendingAliveNotifications(TimeSpan.FromSeconds(options.BlastAliveMessageIntervalSeconds));
+                }
             }
             catch (Exception ex)
             {
@@ -285,42 +283,33 @@ namespace Emby.Dlna.Main
             var udn = CreateUuid(_appHost.SystemId);
             var descriptorUri = "/dlna/" + udn + "/description.xml";
 
-            var bindAddresses = NetworkManager.CreateCollection(
-                _networkManager.GetInternalBindAddresses()
-                .Where(i => i.AddressFamily == AddressFamily.InterNetwork || (i.AddressFamily == AddressFamily.InterNetworkV6 && i.Address.ScopeId != 0)));
+            // Only get bind addresses in LAN
+            // IPv6 is currently unsupported
+            var validInterfaces = _networkManager.GetInternalBindAddresses()
+                .Where(x => x.Address is not null)
+                .Where(x => x.AddressFamily != AddressFamily.InterNetworkV6)
+                .ToList();
 
-            if (bindAddresses.Count == 0)
+            if (validInterfaces.Count == 0)
             {
-                // No interfaces returned, so use loopback.
-                bindAddresses = _networkManager.GetLoopbacks();
+                // No interfaces returned, fall back to loopback
+                validInterfaces = _networkManager.GetLoopbacks().ToList();
             }
 
-            foreach (IPNetAddress address in bindAddresses)
+            foreach (var intf in validInterfaces)
             {
-                if (address.AddressFamily == AddressFamily.InterNetworkV6)
-                {
-                    // Not supporting IPv6 right now
-                    continue;
-                }
-
-                // Limit to LAN addresses only
-                if (!_networkManager.IsInLocalNetwork(address))
-                {
-                    continue;
-                }
-
                 var fullService = "urn:schemas-upnp-org:device:MediaServer:1";
 
-                _logger.LogInformation("Registering publisher for {ResourceName} on {DeviceAddress}", fullService, address);
+                _logger.LogInformation("Registering publisher for {ResourceName} on {DeviceAddress}", fullService, intf.Address);
 
-                var uri = new UriBuilder(_appHost.GetApiUrlForLocalAccess(address, false) + descriptorUri);
+                var uri = new UriBuilder(_appHost.GetApiUrlForLocalAccess(intf.Address, false) + descriptorUri);
 
                 var device = new SsdpRootDevice
                 {
                     CacheLifetime = TimeSpan.FromSeconds(1800), // How long SSDP clients can cache this info.
                     Location = uri.Uri, // Must point to the URL that serves your devices UPnP description document.
-                    Address = address.Address,
-                    PrefixLength = address.PrefixLength,
+                    Address = intf.Address,
+                    PrefixLength = NetworkExtensions.MaskToCidr(intf.Subnet.Prefix),
                     FriendlyName = "Jellyfin",
                     Manufacturer = "Jellyfin",
                     ModelName = "Jellyfin Server",
@@ -382,7 +371,7 @@ namespace Emby.Dlna.Main
         {
             lock (_syncLock)
             {
-                if (_manager != null)
+                if (_manager is not null)
                 {
                     return;
                 }
@@ -417,7 +406,7 @@ namespace Emby.Dlna.Main
         {
             lock (_syncLock)
             {
-                if (_manager != null)
+                if (_manager is not null)
                 {
                     try
                     {
@@ -436,7 +425,7 @@ namespace Emby.Dlna.Main
 
         public void DisposeDevicePublisher()
         {
-            if (_publisher != null)
+            if (_publisher is not null)
             {
                 _logger.LogInformation("Disposing SsdpDevicePublisher");
                 _publisher.Dispose();
@@ -456,7 +445,7 @@ namespace Emby.Dlna.Main
             DisposePlayToManager();
             DisposeDeviceDiscovery();
 
-            if (_communicationsServer != null)
+            if (_communicationsServer is not null)
             {
                 _logger.LogInformation("Disposing SsdpCommunicationsServer");
                 _communicationsServer.Dispose();

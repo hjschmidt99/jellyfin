@@ -71,15 +71,9 @@ namespace MediaBrowser.Controller.Entities
             where T : BaseItem
             where TU : BaseItem
         {
-            if (source == null)
-            {
-                throw new ArgumentNullException(nameof(source));
-            }
+            ArgumentNullException.ThrowIfNull(source);
 
-            if (dest == null)
-            {
-                throw new ArgumentNullException(nameof(dest));
-            }
+            ArgumentNullException.ThrowIfNull(dest);
 
             var destProps = typeof(TU).GetProperties().Where(x => x.CanWrite).ToList();
 
@@ -95,13 +89,13 @@ namespace MediaBrowser.Controller.Entities
                 }
 
                 var v = sourceProp.GetValue(source);
-                if (v == null)
+                if (v is null)
                 {
                     continue;
                 }
 
                 var p = destProps.Find(x => x.Name == sourceProp.Name);
-                if (p != null)
+                if (p is not null)
                 {
                     p.SetValue(dest, v);
                 }

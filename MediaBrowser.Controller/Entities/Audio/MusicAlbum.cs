@@ -54,7 +54,7 @@ namespace MediaBrowser.Controller.Entities.Audio
         public string AlbumArtist => AlbumArtists.FirstOrDefault();
 
         [JsonIgnore]
-        public override bool SupportsPeople => false;
+        public override bool SupportsPeople => true;
 
         /// <summary>
         /// Gets the tracks.
@@ -138,7 +138,7 @@ namespace MediaBrowser.Controller.Entities.Audio
 
             var artist = GetMusicArtist(new DtoOptions(false));
 
-            if (artist != null)
+            if (artist is not null)
             {
                 id.ArtistProviderIds = artist.ProviderIds;
             }

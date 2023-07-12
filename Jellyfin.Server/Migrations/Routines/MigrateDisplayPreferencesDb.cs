@@ -10,6 +10,7 @@ using Jellyfin.Server.Implementations;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Dto;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using SQLitePCL.pretty;
 
@@ -24,7 +25,7 @@ namespace Jellyfin.Server.Migrations.Routines
 
         private readonly ILogger<MigrateDisplayPreferencesDb> _logger;
         private readonly IServerApplicationPaths _paths;
-        private readonly JellyfinDbProvider _provider;
+        private readonly IDbContextFactory<JellyfinDbContext> _provider;
         private readonly JsonSerializerOptions _jsonOptions;
         private readonly IUserManager _userManager;
 
@@ -38,7 +39,7 @@ namespace Jellyfin.Server.Migrations.Routines
         public MigrateDisplayPreferencesDb(
             ILogger<MigrateDisplayPreferencesDb> logger,
             IServerApplicationPaths paths,
-            JellyfinDbProvider provider,
+            IDbContextFactory<JellyfinDbContext> provider,
             IUserManager userManager)
         {
             _logger = logger;
@@ -84,13 +85,13 @@ namespace Jellyfin.Server.Migrations.Routines
             var dbFilePath = Path.Combine(_paths.DataPath, DbFilename);
             using (var connection = SQLite3.Open(dbFilePath, ConnectionFlags.ReadOnly, null))
             {
-                using var dbContext = _provider.CreateContext();
+                using var dbContext = _provider.CreateDbContext();
 
                 var results = connection.Query("SELECT * FROM userdisplaypreferences");
                 foreach (var result in results)
                 {
                     var dto = JsonSerializer.Deserialize<DisplayPreferencesDto>(result[3].ToBlob(), _jsonOptions);
-                    if (dto == null)
+                    if (dto is null)
                     {
                         continue;
                     }
@@ -107,7 +108,7 @@ namespace Jellyfin.Server.Migrations.Routines
 
                     displayPrefs.Add(displayPreferencesKey);
                     var existingUser = _userManager.GetUserById(dtoUserId);
-                    if (existingUser == null)
+                    if (existingUser is null)
                     {
                         _logger.LogWarning("User with ID {UserId} does not exist in the database, skipping migration.", dtoUserId);
                         continue;
@@ -129,12 +130,10 @@ namespace Jellyfin.Server.Migrations.Routines
                         SkipForwardLength = dto.CustomPrefs.TryGetValue("skipForwardLength", out var length) && int.TryParse(length, out var skipForwardLength)
                             ? skipForwardLength
                             : 30000,
-                        SkipBackwardLength = dto.CustomPrefs.TryGetValue("skipBackLength", out length) && !string.IsNullOrEmpty(length) && int.TryParse(length, out var skipBackwardLength)
+                        SkipBackwardLength = dto.CustomPrefs.TryGetValue("skipBackLength", out length) && int.TryParse(length, out var skipBackwardLength)
                             ? skipBackwardLength
                             : 10000,
-                        EnableNextVideoInfoOverlay = dto.CustomPrefs.TryGetValue("enableNextVideoInfoOverlay", out var enabled) && !string.IsNullOrEmpty(enabled)
-                            ? bool.Parse(enabled)
-                            : true,
+                        EnableNextVideoInfoOverlay = !dto.CustomPrefs.TryGetValue("enableNextVideoInfoOverlay", out var enabled) || string.IsNullOrEmpty(enabled) || bool.Parse(enabled),
                         DashboardTheme = dto.CustomPrefs.TryGetValue("dashboardtheme", out var theme) ? theme : string.Empty,
                         TvHome = dto.CustomPrefs.TryGetValue("tvhome", out var home) ? home : string.Empty
                     };
